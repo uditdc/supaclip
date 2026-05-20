@@ -1,0 +1,232 @@
+from __future__ import annotations
+
+import contextlib
+import os
+import sys
+from pathlib import Path
+from typing import Any
+
+from .db import connect
+from .paths import resolve_catalog_path
+from .search import (
+    ClipRow,
+    get_clip,
+    get_source,
+    list_sources,
+    search,
+    stats,
+)
+
+
+def _catalog_path() -> Path:
+    return resolve_catalog_path(os.environ.get("CLIPPER_CATALOG"))
+
+
+def _clip_to_dict(c: ClipRow) -> dict[str, Any]:
+    return c.to_dict()
+
+
+def _build_server():
+    try:
+        from mcp.server.fastmcp import FastMCP
+    except ImportError as e:
+        raise SystemExit(
+            "MCP support not installed. Install with: pip install -e \".[mcp]\"\n"
+            f"({e})"
+        )
+
+    server = FastMCP("supaclip")
+    catalog_path = _catalog_path()
+
+    def _conn():
+        return contextlib.closing(connect(catalog_path))
+
+    @server.tool()
+    def catalog_search(
+        query: str | None = None,
+        categories: list[str] | None = None,
+        all_categories: bool = False,
+        min_score: int | None = None,
+        max_score: int | None = None,
+        min_duration: float | None = None,
+        max_duration: float | None = None,
+        segmenter: str | None = None,
+        game_profile: str | None = None,
+        source: str | None = None,
+        signals: list[str] | None = None,
+        order_by: str = "score",
+        limit: int = 25,
+    ) -> list[dict[str, Any]]:
+        """Search clips across the catalog.
+
+        `query` is an FTS5 expression over description, audio_cues, and tags.
+        `categories` filters by category (OR by default; AND if all_categories).
+        `signals` is a list of "key=value" or "key~=value" filters over each
+        clip's game_signals JSON.
+        Returns a list of clip dicts including absolute file/keyframe paths.
+        """
+        from .search import parse_signal_filter
+
+        parsed_signals = [parse_signal_filter(s) for s in signals or []]
+        with _conn() as conn:
+            rows = search(
+                conn,
+                query=query,
+                categories=categories,
+                all_categories=all_categories,
+                min_score=min_score,
+                max_score=max_score,
+                min_duration=min_duration,
+                max_duration=max_duration,
+                segmenter=segmenter,
+                game_profile=game_profile,
+                source=source,
+                signals=parsed_signals or None,
+                order_by=order_by,
+                limit=limit,
+            )
+            return [_clip_to_dict(r) for r in rows]
+
+    @server.tool()
+    def catalog_get_clip(clip_id: int) -> dict[str, Any] | None:
+        """Fetch a single clip by its catalog id."""
+        with _conn() as conn:
+            row = get_clip(conn, clip_id)
+            return _clip_to_dict(row) if row else None
+
+    @server.tool()
+    def catalog_get_source(source_id: int) -> dict[str, Any] | None:
+        """Fetch a source video by its catalog id."""
+        with _conn() as conn:
+            return get_source(conn, source_id)
+
+    @server.tool()
+    def catalog_list_sources() -> list[dict[str, Any]]:
+        """List every source video in the catalog with extract/clip counts."""
+        with _conn() as conn:
+            return list_sources(conn)
+
+    @server.tool()
+    def catalog_stats() -> dict[str, Any]:
+        """Row counts and DB size."""
+        with _conn() as conn:
+            s = stats(conn)
+        size = catalog_path.stat().st_size if catalog_path.exists() else 0
+        return {"catalog": str(catalog_path), "size_bytes": size, **s}
+
+    @server.tool()
+    def get_clip_preview(clip_id: int) -> dict[str, Any] | None:
+        """Compact preview of a clip for EDL composition.
+
+        Returns the fields Claude needs to decide whether a clip fits a b-roll
+        cue: description, categories, duration, score, keyframe_paths, source
+        file, and source_in/source_out (so that EDLVideoCue.source_in can be
+        set correctly).
+        """
+        with _conn() as conn:
+            row = get_clip(conn, clip_id)
+            if row is None:
+                return None
+            return {
+                "clip_id": row.clip_id,
+                "clip_local_id": row.clip_local_id,
+                "description": row.description,
+                "categories": row.categories,
+                "duration": row.duration,
+                "score": row.score,
+                "source_in": row.source_in,
+                "source_out": row.source_out,
+                "source_file": row.source_file,
+                "file": row.file,
+                "keyframes": row.keyframes,
+                "game_signals": row.game_signals,
+                "audio": row.audio,
+                "resolution": row.resolution,
+                "fps": row.fps,
+            }
+
+    @server.tool()
+    def validate_edl(edl: dict[str, Any]) -> dict[str, Any]:
+        """Validate an EDL (gaps, overlaps, clip refs, cue durations).
+
+        Pass the full EDL JSON. Returns {ok, issues:[{severity,path,message}]}.
+        Run this before render_edl to catch problems early.
+        """
+        from clipper.core.edl import EDL
+        from clipper.core.edl import validate_edl as _v
+
+        try:
+            parsed = EDL.model_validate(edl)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "issues": [
+                {"severity": "error", "path": "<root>", "message": str(e)}
+            ]}
+        with _conn() as conn:
+            issues = _v(parsed, resolver=lambda cid: get_clip(conn, cid))
+        return {
+            "ok": not any(i.severity == "error" for i in issues),
+            "issues": [i.to_dict() for i in issues],
+        }
+
+    @server.tool()
+    def render_edl(
+        edl: dict[str, Any] | None = None,
+        edl_path: str | None = None,
+        output_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Render an EDL to an mp4 (synthesizes voiceover, reframes,
+        concatenates, overlays text, mixes audio).
+
+        Provide either `edl` (the dict) or `edl_path` (a path on disk). If
+        `output_path` is omitted, the mp4 is written to a tempfile and the
+        path is returned. A sidecar `<output>.edl.json` is always written.
+
+        Requires `ELEVENLABS_API_KEY` in the MCP server's environment if the
+        EDL contains a voiceover. May spend TTS credits on each call unless
+        the same (text + voice + settings) tuple is already cached.
+        """
+        import json as _json
+        import tempfile
+        from clipper.stitch.render import RenderConfig, render
+
+        if not edl and not edl_path:
+            return {"status": "error", "message": "supply edl or edl_path"}
+
+        if edl_path:
+            path = edl_path
+        else:
+            fd, path = tempfile.mkstemp(suffix=".json", prefix="edl_")
+            with os.fdopen(fd, "w") as fh:
+                _json.dump(edl, fh)
+
+        if output_path is None:
+            fd, output_path = tempfile.mkstemp(suffix=".mp4", prefix="short_")
+            os.close(fd)
+
+        cfg = RenderConfig(
+            edl_path=path,
+            output_path=output_path,
+            catalog_path=str(catalog_path),
+        )
+        try:
+            result = render(cfg)
+        except Exception as e:  # noqa: BLE001
+            return {"status": "error", "message": f"{type(e).__name__}: {e}"}
+        return {"status": "ok", "output": result.output,
+                "sidecar": result.sidecar, "duration": result.duration}
+
+    return server
+
+
+def main(argv: list[str] | None = None) -> int:
+    try:
+        server = _build_server()
+    except SystemExit as e:
+        sys.stderr.write(str(e) + "\n")
+        return 2
+    server.run()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

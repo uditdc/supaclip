@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "title": "Rockstar Spent 12 Years On This ONE Detail",
+  "output": { "width": 1080, "height": 1920, "fps": 60, "duration": 38.0 },
+  "voiceover": {
+    "backend": "elevenlabs",
+    "voice_id": "REPLACE_WITH_VOICE_ID",
+    "settings": { "stability": 40, "similarity": 75, "style": 30 },
+    "script": "Twelve years. <break time=\"0.4s\"/> That's how long Rockstar spent rebuilding a single mechanic. <break time=\"0.3s\"/> In GTA 5, hair is a helmet. <break time=\"0.3s\"/> One static model. <break time=\"0.3s\"/> In GTA 6? <break time=\"0.4s\"/> Every strand reacts to wind, speed, and motion. <break time=\"0.3s\"/> This is procedural hair physics. <break time=\"0.3s\"/> And it changes everything."
+  },
+  "video": [
+    { "start":  0.0, "end":  4.0, "clip_id": 1 },
+    { "start":  4.0, "end": 10.0, "clip_id": 1 },
+    { "start": 10.0, "end": 20.0, "clip_id": 2 },
+    { "start": 20.0, "end": 30.0, "clip_id": 3 },
+    { "start": 30.0, "end": 38.0, "clip_id": 3 }
+  ],
+  "audio": [
+    { "start": 0.0, "end": 38.0, "kind": "voiceover" }
+  ],
+  "ost": [
+    { "start":  0.0, "end":  4.5, "text": "12 YEARS FOR THIS?",       "style": "bold_yellow" },
+    { "start":  5.0, "end": 14.0, "text": "GTA 5: STATIC MESH",        "style": "red_strike" },
+    { "start": 15.0, "end": 22.0, "text": "GTA 6: PROCEDURAL STRANDS", "style": "neon_pink" },
+    { "start": 22.0, "end": 30.0, "text": "EVERY. SINGLE. STRAND.",    "style": "white_pop" },
+    { "start": 35.0, "end": 38.0, "text": "WHICH SIDE LOOKS REAL?",    "style": "comment_trap" }
+  ]
+}

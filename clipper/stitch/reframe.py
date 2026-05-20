@@ -1,0 +1,37 @@
+from __future__ import annotations
+
+from clipper.core.edl import ReframeMode
+
+DEFAULT_WIDTH = 1080
+DEFAULT_HEIGHT = 1920
+DEFAULT_FPS = 60
+
+
+def build_reframe_filter(
+    mode: ReframeMode = "crop_center",
+    dst_w: int = DEFAULT_WIDTH,
+    dst_h: int = DEFAULT_HEIGHT,
+    fps: int = DEFAULT_FPS,
+) -> str:
+    """Return an ffmpeg filter-chain string that maps any source resolution to
+    (dst_w, dst_h) at `fps` frames/s. Used per-input inside a filter_complex.
+    """
+    if mode == "letterbox":
+        return (
+            f"scale={dst_w}:{dst_h}:force_original_aspect_ratio=decrease,"
+            f"pad={dst_w}:{dst_h}:(ow-iw)/2:(oh-ih)/2:black,"
+            f"setsar=1,fps={fps},format=yuv420p"
+        )
+
+    if mode == "crop_left":
+        x_expr, y_expr = "0", "(in_h-out_h)/2"
+    elif mode == "crop_right":
+        x_expr, y_expr = "in_w-out_w", "(in_h-out_h)/2"
+    else:
+        x_expr, y_expr = "(in_w-out_w)/2", "(in_h-out_h)/2"
+
+    return (
+        f"scale={dst_w}:{dst_h}:force_original_aspect_ratio=increase,"
+        f"crop={dst_w}:{dst_h}:{x_expr}:{y_expr},"
+        f"setsar=1,fps={fps},format=yuv420p"
+    )
