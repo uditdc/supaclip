@@ -26,13 +26,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timestamps", help="start,end pairs file (required for --segmenter manual)")
     p.add_argument("--interval", type=float, default=60.0, help="window length for interval strategy")
     p.add_argument("--game-profile", default="gta", help="built-in profile name or path to JSON")
-    p.add_argument("--analyzer", choices=("gemma", "gemma-video"), default="gemma")
+    p.add_argument("--analyzer", choices=("gemma", "gemma-video"), default="gemma-video",
+                   help="default: gemma-video (Google AI Studio, requires GEMINI_API_KEY); "
+                        "use `gemma` for the OpenAI-compatible frames fallback")
     p.add_argument("--llm", default=None, help="analyzer model id (default: env LLM_MODEL or gemma4)")
     p.add_argument("--base-url", default=None, help="OpenAI-compatible endpoint")
     p.add_argument("--api-key", default=None, help="API key (unused for local Ollama)")
     p.add_argument("--keyframes", type=int, default=3)
     p.add_argument("--dedup-iou", type=float, default=0.6)
     p.add_argument("--no-dedup", action="store_true")
+    p.add_argument("--no-chunk", action="store_true",
+                   help="disable audio-trough chunking + aggregator pass for long segments")
     p.add_argument("--min-clip", type=float, default=15.0)
     p.add_argument("--max-clip", type=float, default=60.0)
     p.add_argument("--max-duration", type=float, default=5400.0)
@@ -104,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
         no_cache=args.no_cache,
         keep_temp=args.keep_temp,
         verbose=args.verbose,
+        no_chunk=args.no_chunk,
     )
 
     try:

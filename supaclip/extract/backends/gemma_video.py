@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -24,6 +25,8 @@ TARGET_FPS = 24
 INLINE_MAX_BYTES = 15 * 1024 * 1024
 FILES_API_POLL_SECONDS = 1.5
 FILES_API_POLL_TIMEOUT = 180.0
+MAX_API_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = (2.0, 5.0, 15.0)
 
 
 class GemmaVideoBackend:
@@ -65,12 +68,31 @@ class GemmaVideoBackend:
                 video_path, chunk_start, chunk_end,
                 TARGET_WIDTH, TARGET_VIDEO_BITRATE, TARGET_FPS,
             )
-            raw = self._call(client, mp4_bytes, profile, chunk_duration)
+
+            raw, api_err = self._call_with_retries(
+                client, mp4_bytes, profile, chunk_duration, chunk_start, chunk_end,
+            )
+            if api_err is not None:
+                _log_chunk_error(chunk_start, chunk_end, self.model, api_err)
+                merged.append(SegmentEvent(
+                    start=chunk_start - start,
+                    end=chunk_end - start,
+                    description=f"(analyzer API error: {api_err})",
+                ))
+                continue
+
             parsed = _parse_json(raw)
             if parsed is None:
-                raw = self._call(client, mp4_bytes, profile, chunk_duration)
-                parsed = _parse_json(raw)
+                raw2, api_err2 = self._call_with_retries(
+                    client, mp4_bytes, profile, chunk_duration, chunk_start, chunk_end,
+                )
+                if api_err2 is None:
+                    parsed = _parse_json(raw2)
             if parsed is None:
+                _log_chunk_error(
+                    chunk_start, chunk_end, self.model,
+                    "analyzer returned non-JSON output twice in a row",
+                )
                 merged.append(SegmentEvent(
                     start=chunk_start - start,
                     end=chunk_end - start,
@@ -112,6 +134,42 @@ class GemmaVideoBackend:
         finally:
             _release_video_part(client, video_part)
         return getattr(resp, "text", "") or ""
+
+    def _call_with_retries(
+        self,
+        client,
+        mp4_bytes: bytes,
+        profile: GameProfile,
+        duration: float,
+        chunk_start: float,
+        chunk_end: float,
+    ) -> tuple[str, str | None]:
+        """Call the model with retry on transient failures.
+
+        Returns (raw_text, error_str). On success error_str is None. On a
+        permanent failure (retries exhausted, or non-retryable error) returns
+        ("", error_str). Logs every retry attempt to stderr so the user can see
+        what's happening without --verbose.
+        """
+        last_err: str | None = None
+        for attempt in range(1, MAX_API_ATTEMPTS + 1):
+            try:
+                return self._call(client, mp4_bytes, profile, duration), None
+            except Exception as e:  # noqa: BLE001
+                desc = _describe_error(e)
+                retryable = _is_retryable(e)
+                last_err = desc
+                if not retryable or attempt == MAX_API_ATTEMPTS:
+                    return "", desc
+                backoff = RETRY_BACKOFF_SECONDS[
+                    min(attempt - 1, len(RETRY_BACKOFF_SECONDS) - 1)
+                ]
+                sys.stderr.write(
+                    f"  ! gemma-video {chunk_start:.1f}-{chunk_end:.1f}s attempt {attempt}"
+                    f"/{MAX_API_ATTEMPTS} failed ({desc}); retrying in {backoff:.0f}s\n"
+                )
+                time.sleep(backoff)
+        return "", last_err or "unknown error"
 
 
 def _split_chunks(start: float, end: float, max_len: float) -> list[tuple[float, float]]:
@@ -222,6 +280,46 @@ def _looks_like_ai_studio_key(key: str | None) -> bool:
     return bool(key) and not key.startswith("sk-") and not key.startswith("Bearer ")
 
 
+def _describe_error(exc: Exception) -> str:
+    """Compact one-line summary of a google-genai exception for logs."""
+    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    status = getattr(exc, "status", None)
+    message = getattr(exc, "message", None) or str(exc)
+    if code or status:
+        parts = [type(exc).__name__]
+        if code:
+            parts.append(f"{code}")
+        if status:
+            parts.append(str(status))
+        return f"{' '.join(parts)}: {message[:200]}"
+    return f"{type(exc).__name__}: {message[:200]}"
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """5xx and 429 are transient. 4xx (other than 429) are not."""
+    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    try:
+        code_int = int(code) if code is not None else None
+    except (TypeError, ValueError):
+        code_int = None
+
+    if code_int is not None:
+        if code_int >= 500:
+            return True
+        if code_int == 429:
+            return True
+        return False
+
+    name = type(exc).__name__
+    return name in {"ServerError", "ServiceUnavailable", "DeadlineExceeded", "TimeoutError"}
+
+
+def _log_chunk_error(start: float, end: float, model: str, err: str) -> None:
+    sys.stderr.write(
+        f"  ✗ gemma-video chunk {start:.1f}-{end:.1f}s ({model}) failed: {err}\n"
+    )
+
+
 def _normalize_model(model: str) -> str:
     """Strip OpenRouter-style prefixes/suffixes so the same model id works for both backends."""
     m = model.strip()
@@ -245,13 +343,34 @@ def _build_prompt(profile: GameProfile, duration: float) -> str:
         f"begins when ANY of these change: on-foot vs in-vehicle state, vehicle\n"
         f"being driven, wanted level, activity (walking, driving, shooting,\n"
         f"crashing), on-screen mission/event text, or location/environment.\n\n"
+        f"BOUNDARY PRECISION (this is the most important part — get the times right):\n"
+        f"- An event's `start` MUST equal the timestamp of the first moment the\n"
+        f"  new situation is visible. NOT a second earlier, NOT a second later.\n"
+        f"- An event's `end` MUST equal the timestamp of the last moment the\n"
+        f"  situation is still visible. If the next moment already shows the new\n"
+        f"  situation, set `end` to THIS moment's timestamp.\n"
+        f"- The first event's `start` is 0.0 unless you are intentionally skipping\n"
+        f"  a dull opening. The last event's `end` is {duration:.1f} unless you are\n"
+        f"  intentionally leaving a trailing dull gap.\n"
+        f"- Consecutive events should be tight: `events[i].end == events[i+1].start`\n"
+        f"  when the transition is sharp. Only leave a gap if you are deliberately\n"
+        f"  skipping dull footage.\n\n"
+        f"MINIMUM EVENT DURATION = 10 seconds. Every event you emit MUST span\n"
+        f"at least 10 seconds. Shorter beats are NOT separate events — either:\n"
+        f"- EXTEND the adjacent event to absorb the short beat, or\n"
+        f"- DROP the short beat if it's a transition or dull moment.\n"
+        f"It is better to under-segment (fewer, longer events) than to emit a\n"
+        f"3-second \"player turns left\" sliver.\n\n"
         f"Aim for:\n"
         f"- ≤ 20s clip with one continuous action: 1 event is fine.\n"
-        f"- > 30s with state changes: at least 3 events.\n"
-        f"- > 60s with state changes: at least 5 events.\n"
-        f"- > 120s: typically 6–10 events.\n"
+        f"- 20–40s with state changes: 1–2 events.\n"
+        f"- 40–90s with state changes: 2–4 events.\n"
+        f"- > 90s: 3–6 events, each ≥ 10s.\n"
         f"Skip dull stretches (idling, menus, loading) by leaving gaps between\n"
         f"events; do NOT pad to cover the whole clip.\n\n"
+        f"DO NOT INVENT AUDIO. The video stream is muted — you have NO sound\n"
+        f"input. Do not guess sirens, engines, gunfire, music, or dialogue. The\n"
+        f"schema below does not include an audio field.\n\n"
         f"REQUIRED JSON SHAPE (return JSON only, no prose, no code fences):\n"
         f"{{\n"
         f'  "events": [\n'
@@ -261,8 +380,7 @@ def _build_prompt(profile: GameProfile, duration: float) -> str:
         f'      "description": "1-3 sentences grounded in visible footage; no inventions",\n'
         f'      "categories": ["tag", ...],\n'
         f'      "base_interest": 0,\n'
-        f'      "game_signals": {{\n{sig_lines}\n      }},\n'
-        f'      "audio_cues": ["e.g. sirens", "gunfire", "engine"]\n'
+        f'      "game_signals": {{\n{sig_lines}\n      }}\n'
         f"    }}\n"
         f"  ]\n"
         f"}}"

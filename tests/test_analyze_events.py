@@ -105,6 +105,7 @@ def test_prune_overlaps_trims_minor_overlap_into_disjoint_pair():
 
 def test_frame_count_scales_with_duration():
     assert _frame_count_for(0.0) == 0
-    assert _frame_count_for(10.0) == 6     # floor
-    assert _frame_count_for(60.0) == 12    # ~12 frames at 5s spacing
-    assert _frame_count_for(600.0) == 24   # ceiling
+    assert _frame_count_for(3.0) == 6      # floor (1 fps would give 3)
+    assert _frame_count_for(10.0) == 10    # 1 fps
+    assert _frame_count_for(60.0) == 60
+    assert _frame_count_for(120.0) == 120

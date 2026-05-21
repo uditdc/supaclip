@@ -33,10 +33,23 @@ def _parse_json(text: str) -> dict[str, Any] | None:
         return None
 
 
-def _coerce(parsed: dict[str, Any], profile: GameProfile, duration: float) -> SegmentAnalysis:
-    raw_events = parsed.get("events")
-    if not isinstance(raw_events, list) or not raw_events:
-        single = _coerce_event(parsed, profile, duration, fallback_window=(0.0, duration))
+def _coerce(parsed: Any, profile: GameProfile, duration: float) -> SegmentAnalysis:
+    if isinstance(parsed, list):
+        raw_events = parsed
+        parsed_dict: dict[str, Any] = {}
+    elif isinstance(parsed, dict):
+        raw_events = parsed.get("events")
+        parsed_dict = parsed
+        if not isinstance(raw_events, list):
+            raw_events = None
+    else:
+        return SegmentAnalysis(events=[SegmentEvent(
+            start=0.0, end=duration,
+            description="(analyzer returned unexpected JSON shape)",
+        )])
+
+    if not raw_events:
+        single = _coerce_event(parsed_dict, profile, duration, fallback_window=(0.0, duration))
         if single is None:
             return SegmentAnalysis(events=[SegmentEvent(
                 start=0.0, end=duration,

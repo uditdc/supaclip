@@ -6,7 +6,6 @@ from pathlib import Path
 from ..core.cache import Cache, fingerprint_file
 from ..core.ffmpeg import (
     VideoInfo,
-    cut_clip,
     ensure_ffmpeg,
     extract_keyframes,
     extract_loudness_curve,
@@ -22,8 +21,14 @@ from ..core.manifest import (
     now_iso,
     save_manifest,
 )
+from .aggregate import (
+    PROMPT_VERSION as AGG_PROMPT_VERSION,
+    AggregateConfig,
+    aggregate_events,
+)
 from .analyze import PROMPT_VERSION, AnalyzerBackend, blend_score, build_backend
 from .audio import audio_factor_for_range, detect_peaks, peak_loudness_db
+from .chunking import chunk_segment
 from .dedupe import merge_overlapping
 from .profiles import GameProfile, load_profile
 from .segment import (
@@ -58,6 +63,7 @@ class ExtractConfig:
     no_cache: bool
     keep_temp: bool
     verbose: bool
+    no_chunk: bool = False
 
 
 def run(cfg: ExtractConfig, log: Logger) -> list[Manifest]:
@@ -97,7 +103,7 @@ def _run_one(
     samples: list[tuple[float, float]] = []
     if info.has_audio:
         cached = cache.get("audio", (fingerprint,))
-        if cached is not None:
+        if cached:
             samples = [(float(t), float(db)) for t, db in cached]
             log.detail(f"audio cache hit ({len(samples)} samples)")
         else:
@@ -110,13 +116,13 @@ def _run_one(
         peaks = []
 
     log.stage(f"Segment ({cfg.segmenter})")
-    seg_key = (fingerprint, cfg.segmenter, cfg.interval, cfg.min_clip, cfg.max_clip)
+    seg_key = (fingerprint, cfg.segmenter, cfg.interval, cfg.min_clip, cfg.max_clip, "v2-trough")
     cached_ranges = cache.get("segments", seg_key)
     if cached_ranges is not None:
         ranges = [(float(a), float(b)) for a, b in cached_ranges]
         log.detail(f"segment cache hit ({len(ranges)} ranges)")
     else:
-        ranges = _segment(video_path, cfg, info, peaks)
+        ranges = _segment(video_path, cfg, info, samples)
         cache.set("segments", seg_key, ranges)
     if cfg.segmenter != "file":
         ranges = clamp_ranges(ranges, cfg.min_clip, cfg.max_clip, info.duration)
@@ -129,97 +135,126 @@ def _run_one(
         log.success(f"{before} → {len(ranges)} after temporal merge (IoU ≥ {cfg.dedup_iou})")
 
     log.stage(f"Analyze ({cfg.analyzer}/{cfg.llm})")
-    analyses: list[list[dict]] = []
+    flat_events: list[dict] = []
     for i, (start, end) in enumerate(ranges, 1):
-        ana_key = (
-            fingerprint, round(start, 3), round(end, 3),
-            cfg.analyzer, cfg.llm, profile.name, PROMPT_VERSION,
+        chunks = [(start, end)] if cfg.no_chunk else chunk_segment(start, end, samples)
+        chunked = len(chunks) > 1
+        if chunked:
+            log.info(f"[{i}/{len(ranges)}] {start:.1f}-{end:.1f}s "
+                     f"({end - start:.1f}s) → {len(chunks)} chunks")
+        else:
+            log.info(f"[{i}/{len(ranges)}] analyzing {start:.1f}-{end:.1f}s ({end - start:.1f}s)")
+
+        for c_idx, (cs, ce) in enumerate(chunks, 1):
+            chunk_key = (
+                fingerprint, round(cs, 3), round(ce, 3),
+                cfg.analyzer, cfg.llm, profile.name, PROMPT_VERSION,
+            )
+            cached_chunk = cache.get("analysis", chunk_key)
+            if cached_chunk is not None:
+                if chunked:
+                    log.detail(f"  chunk {c_idx}/{len(chunks)} cache hit "
+                               f"{cs:.1f}-{ce:.1f}s ({len(cached_chunk)} events)")
+                payload = cached_chunk
+            else:
+                if chunked:
+                    log.detail(f"  chunk {c_idx}/{len(chunks)} analyzing {cs:.1f}-{ce:.1f}s")
+                analysis = backend.analyze_segment(video_path, cs, ce, profile)
+                payload = [
+                    {
+                        "start": ev.start,
+                        "end": ev.end,
+                        "description": ev.description,
+                        "categories": ev.categories,
+                        "base_interest": ev.base_interest,
+                        "game_signals": ev.game_signals,
+                    }
+                    for ev in analysis.events
+                ]
+                cache.set("analysis", chunk_key, payload)
+            for ev in payload:
+                flat_events.append({
+                    **ev,
+                    "start": float(ev.get("start", 0.0)) + cs,
+                    "end": float(ev.get("end", 0.0)) + cs,
+                })
+
+    log.success(f"analyzed {len(ranges)} segments → {len(flat_events)} raw events")
+
+    if len(flat_events) >= 2:
+        log.stage("Aggregate (final pass)")
+        agg_cfg = _build_agg_config(cfg)
+        agg_signature = tuple(
+            (round(float(e.get("start", 0.0)), 1), round(float(e.get("end", 0.0)), 1))
+            for e in flat_events
         )
-        cached_ana = cache.get("analysis", ana_key)
-        if cached_ana is not None:
-            log.detail(f"[{i}/{len(ranges)}] cache hit {start:.1f}-{end:.1f}s "
-                       f"({len(cached_ana)} events)")
-            analyses.append(cached_ana)
-            continue
-        log.info(f"[{i}/{len(ranges)}] analyzing {start:.1f}-{end:.1f}s ({end - start:.1f}s)")
-        analysis = backend.analyze_segment(video_path, start, end, profile)
-        payload = [
-            {
-                "start": ev.start,
-                "end": ev.end,
-                "description": ev.description,
-                "categories": ev.categories,
-                "base_interest": ev.base_interest,
-                "game_signals": ev.game_signals,
-                "audio_cues": ev.audio_cues,
-            }
-            for ev in analysis.events
-        ]
-        cache.set("analysis", ana_key, payload)
-        analyses.append(payload)
-    total_events = sum(len(a) for a in analyses)
-    log.success(f"analyzed {len(analyses)} segments → {total_events} events")
+        agg_key = (
+            fingerprint, cfg.analyzer, cfg.llm, profile.name, AGG_PROMPT_VERSION,
+            len(flat_events), agg_signature,
+        )
+        cached_agg = cache.get("aggregate", agg_key)
+        if cached_agg is not None:
+            log.detail(f"aggregator cache hit ({len(cached_agg)} events)")
+            final_events = cached_agg
+        else:
+            log.detail(f"aggregating {len(flat_events)} raw events")
+            final_events = aggregate_events(
+                flat_events,
+                source_duration=info.duration,
+                profile=profile,
+                cfg=agg_cfg,
+            )
+            cache.set("aggregate", agg_key, final_events)
+        log.success(f"{len(flat_events)} → {len(final_events)} after merge/dedupe")
+    else:
+        final_events = flat_events
 
     log.stage("Catalog")
     output_dir.mkdir(parents=True, exist_ok=True)
+    source_path = Path(video_path).resolve()
+    if _is_inside(source_path, output_dir.resolve()):
+        file_str = str(source_path.relative_to(output_dir.resolve()))
+    else:
+        file_str = str(source_path)
     clips: list[Clip] = []
-    clip_idx = 0
-    for seg_idx, ((seg_start, seg_end), events) in enumerate(zip(ranges, analyses), 1):
-        cut_path: Path | None = None
-        if cfg.segmenter != "file":
-            cut_id = f"seg_{seg_idx:02d}"
-            cut_path = output_dir / f"{cut_id}.mp4"
-            cut_clip(video_path, seg_start, seg_end, cut_path)
+    for clip_idx, ev in enumerate(final_events, 1):
+        clip_id = f"clip_{clip_idx:02d}"
 
-        for ev in events:
-            clip_idx += 1
-            clip_id = f"clip_{clip_idx:02d}"
+        ev_start_orig = max(0.0, min(float(ev.get("start", 0.0)), info.duration))
+        ev_end_orig = max(0.0, min(float(ev.get("end", info.duration)), info.duration))
+        if ev_end_orig <= ev_start_orig:
+            continue
+        ev_dur = ev_end_orig - ev_start_orig
 
-            ev_start_offset = float(ev.get("start", 0.0))
-            ev_end_offset = float(ev.get("end", seg_end - seg_start))
-            ev_start_orig = seg_start + ev_start_offset
-            ev_end_orig = seg_start + ev_end_offset
-            ev_dur = max(0.0, ev_end_orig - ev_start_orig)
+        kf_pattern = str(output_dir / f"{clip_id}.kf{{i:02d}}.jpg")
+        kf_paths = extract_keyframes(
+            video_path, ev_start_orig, ev_end_orig, cfg.keyframes, kf_pattern,
+        )
 
-            if cut_path is not None:
-                clip_file_path = cut_path
-                source_in = ev_start_offset
-                source_out = ev_end_offset
-            else:
-                clip_file_path = Path(video_path)
-                source_in = ev_start_orig
-                source_out = ev_end_orig
+        audio_factor = audio_factor_for_range(samples, ev_start_orig, ev_end_orig)
+        score = blend_score(int(ev.get("base_interest", 0)), audio_factor)
+        peak_db = peak_loudness_db(samples, ev_start_orig, ev_end_orig)
 
-            kf_pattern = str(output_dir / f"{clip_id}.kf{{i:02d}}.jpg")
-            kf_paths = extract_keyframes(
-                video_path, ev_start_orig, ev_end_orig, cfg.keyframes, kf_pattern,
-            )
-
-            audio_factor = audio_factor_for_range(samples, ev_start_orig, ev_end_orig)
-            score = blend_score(int(ev.get("base_interest", 0)), audio_factor)
-            peak_db = peak_loudness_db(samples, ev_start_orig, ev_end_orig)
-
-            if cut_path is not None and _is_inside(clip_file_path, output_dir.parent):
-                file_str = str(clip_file_path.relative_to(output_dir.parent))
-            else:
-                file_str = str(clip_file_path)
-
-            clips.append(Clip(
-                id=clip_id,
-                file=file_str,
-                source_in=round(source_in, 3),
-                source_out=round(source_out, 3),
-                duration=round(ev_dur, 3),
-                resolution=info.resolution,
-                fps=info.fps,
-                description=str(ev.get("description") or ""),
-                categories=list(ev.get("categories") or []),
-                score=score,
-                game_signals=dict(ev.get("game_signals") or {}),
-                audio=AudioInfo(peak_loudness_db=peak_db, cues=list(ev.get("audio_cues") or [])),
-                keyframes=[str(Path(k)) for k in kf_paths],
-                segment_source=cfg.segmenter,
-            ))
+        clips.append(Clip(
+            id=clip_id,
+            file=file_str,
+            source_in=round(ev_start_orig, 3),
+            source_out=round(ev_end_orig, 3),
+            duration=round(ev_dur, 3),
+            resolution=info.resolution,
+            fps=info.fps,
+            description=str(ev.get("description") or ""),
+            categories=list(ev.get("categories") or []),
+            score=score,
+            game_signals=dict(ev.get("game_signals") or {}),
+            audio=AudioInfo(peak_loudness_db=peak_db, cues=[]),
+            keyframes=[
+                str(Path(k).relative_to(output_dir)) if _is_inside(Path(k), output_dir)
+                else str(Path(k))
+                for k in kf_paths
+            ],
+            segment_source=cfg.segmenter,
+        ))
 
     manifest = Manifest(
         source=SourceInfo(
@@ -254,7 +289,7 @@ def _segment(
     video_path: str,
     cfg: ExtractConfig,
     info: VideoInfo,
-    peaks,
+    samples: list[tuple[float, float]],
 ) -> list[tuple[float, float]]:
     if cfg.segmenter == "manual":
         if not cfg.timestamps_file:
@@ -266,7 +301,7 @@ def _segment(
         return scene_segments(video_path, cfg.min_clip, cfg.max_clip)
     if cfg.segmenter == "auto":
         return auto_segments_from_peaks(
-            info.duration, peaks, cfg.min_clip, cfg.max_clip,
+            info.duration, samples, cfg.min_clip, cfg.max_clip,
         )
     if cfg.segmenter == "file":
         return file_segments(info.duration)
@@ -279,3 +314,31 @@ def _is_inside(path: Path, base: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _build_agg_config(cfg: ExtractConfig) -> AggregateConfig:
+    """Pick the right transport for the aggregator based on the analyzer.
+
+    gemma → OpenAI-compatible (same endpoint as the vision call).
+    gemma-video → Google AI Studio (same key the analyzer is already using).
+    """
+    if cfg.analyzer == "gemma-video":
+        import os
+        key = (
+            os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("GOOGLE_API_KEY")
+            or os.environ.get("GOOGLE_AI_STUDIO_API_KEY")
+            or cfg.api_key
+        )
+        return AggregateConfig(
+            model=cfg.llm,
+            base_url=cfg.base_url,
+            api_key=key,
+            provider="google",
+        )
+    return AggregateConfig(
+        model=cfg.llm,
+        base_url=cfg.base_url,
+        api_key=cfg.api_key,
+        provider="openai",
+    )

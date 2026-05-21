@@ -118,7 +118,9 @@ def extract_loudness_curve(video_path: str | Path, hop_seconds: float = 0.5) -> 
     current_t: float | None = None
     for line in (proc.stderr or "").splitlines():
         line = line.strip()
-        if line.startswith("frame:"):
+        if line.startswith("[") and "]" in line:
+            line = line.split("]", 1)[1].strip()
+        if "pts_time:" in line:
             for tok in line.split():
                 if tok.startswith("pts_time:"):
                     try:
@@ -196,15 +198,17 @@ def cut_clip(
     end: float,
     out_path: str | Path,
 ) -> None:
-    """Cut [start, end) into out_path at native aspect/resolution (re-encode for accuracy)."""
+    """Cut [start, end) into out_path. Stream-copies when possible (snaps to the
+    nearest input keyframe ≤ start; ffmpeg writes an mp4 edit list so players
+    still begin at the requested time)."""
     duration = max(0.0, end - start)
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-nostats", "-loglevel", "error",
         "-ss", f"{start:.3f}", "-i", str(video_path),
         "-t", f"{duration:.3f}",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-        "-c:a", "aac", "-b:a", "160k",
+        "-c", "copy",
+        "-avoid_negative_ts", "make_zero",
         "-movflags", "+faststart",
         str(out_path),
     ]

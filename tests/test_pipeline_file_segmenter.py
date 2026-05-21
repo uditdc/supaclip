@@ -37,11 +37,6 @@ def patched_ffmpeg(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline_mod, "probe", fake_probe)
     monkeypatch.setattr(pipeline_mod, "extract_loudness_curve", lambda *a, **kw: [])
     monkeypatch.setattr(pipeline_mod, "extract_keyframes", lambda *a, **kw: [])
-
-    def fake_cut(video_path, start, end, out_path):
-        Path(out_path).write_bytes(b"")
-
-    monkeypatch.setattr(pipeline_mod, "cut_clip", fake_cut)
     return tmp_path
 
 
@@ -67,6 +62,7 @@ def _make_cfg(video_path: str, out_dir: Path, segmenter: str) -> ExtractConfig:
         no_cache=True,
         keep_temp=False,
         verbose=False,
+        no_chunk=True,
     )
 
 
@@ -105,7 +101,7 @@ def test_file_segmenter_fans_events_into_clips_sharing_input_file(patched_ffmpeg
     assert not list(out_dir.glob("seg_*.mp4")), "file segmenter must skip sub-mp4 cuts"
 
 
-def test_non_file_segmenter_cuts_one_subfile_per_segment_and_events_share_it(patched_ffmpeg, tmp_path):
+def test_non_file_segmenter_points_clips_at_original_source_with_source_coords(patched_ffmpeg, tmp_path):
     video = tmp_path / "input.mp4"
     video.write_bytes(b"")
     out_dir = tmp_path / "out"
@@ -120,11 +116,14 @@ def test_non_file_segmenter_cuts_one_subfile_per_segment_and_events_share_it(pat
     manifest = _run_one(str(video), cfg, GTA_PROFILE, backend, _Cache(), Logger(verbose=False))
 
     assert len(manifest.clips) >= 2
+    files = {c.file for c in manifest.clips}
+    assert files == {str(video.resolve())}, "all clips must reference the original source"
+
     first_two = manifest.clips[:2]
-    assert first_two[0].file == first_two[1].file, "events from same segment share the cut sub-mp4"
-    assert "seg_01" in first_two[0].file
     assert first_two[0].source_in == 2.0 and first_two[0].source_out == 10.0
     assert first_two[1].source_in == 20.0 and first_two[1].source_out == 40.0
+
+    assert not list(out_dir.glob("seg_*.mp4")), "non-file segmenter must no longer write seg cuts"
 
 
 class _Cache:

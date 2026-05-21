@@ -4,7 +4,7 @@ import csv
 from pathlib import Path
 
 from ..core.ffmpeg import VideoInfo
-from .audio import Peak
+from .chunking import chunk_segment
 
 
 Range = tuple[float, float]
@@ -121,30 +121,19 @@ def scene_segments(video_path: str, min_clip: float, max_clip: float) -> list[Ra
 
 def auto_segments_from_peaks(
     duration: float,
-    peaks: list[Peak],
+    samples: list[tuple[float, float]],
     min_clip: float,
     max_clip: float,
-    pad: float = 8.0,
 ) -> list[Range]:
-    """Heuristic 'auto' fallback when no VLM boundary pass is available.
+    """Audio-trough segmentation: split the whole duration at quiet points.
 
-    Builds candidate ranges centered on each audio peak (pad seconds on each side,
-    capped by max_clip), and if no peaks are present falls back to an even partition
-    of the video into max_clip-sized windows.
+    Matches the chunking logic used by the debug command — boundaries land at
+    local minima in the loudness curve so events are unlikely to be cut in their
+    middle, with 5s overlap between adjacent windows. Falls back to evenly-spaced
+    windows when no audio samples are available.
     """
-    if not peaks:
-        windows = max(1, int(duration // max_clip) or 1)
-        size = duration / windows
-        return [(i * size, min(duration, (i + 1) * size)) for i in range(windows)]
-
-    half = min(max_clip / 2.0, pad)
-    ranges: list[Range] = []
-    for p in peaks:
-        start = max(0.0, p.time - half)
-        end = min(duration, p.time + half)
-        if end - start < min_clip:
-            extra = (min_clip - (end - start)) / 2.0
-            start = max(0.0, start - extra)
-            end = min(duration, end + extra)
-        ranges.append((start, end))
-    return ranges
+    if duration <= 0:
+        return []
+    if not samples:
+        return interval_segments(duration, max_clip)
+    return chunk_segment(0.0, duration, samples)

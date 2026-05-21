@@ -6,7 +6,7 @@ from typing import Any, Protocol
 from .profiles import GameProfile
 
 
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v6"
 
 
 @dataclass

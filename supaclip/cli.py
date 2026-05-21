@@ -7,10 +7,11 @@ USAGE = """\
 supaclip <command> [args...]
 
 Commands:
-  extract   Split a local video into clips and a manifest.json
-  catalog   Add manifests to a global catalog and search across them
-  stitch    Render a short-form video from a Claude-authored EDL
-  mcp       Run the MCP server (exposes catalog to Claude over stdio)
+  extract        Split a local video into clips and a manifest.json
+  catalog        Add manifests to a global catalog and search across them
+  stitch         Render a short-form video from a Claude-authored EDL
+  mcp            Run the MCP server (exposes catalog to Claude over stdio)
+  debug-prompt   Dump what the gemma analyzer would send for one segment
 
 Run `supaclip <command> --help` for command-specific help.
 """
@@ -35,6 +36,10 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == "stitch":
         from .stitch.cli import main as stitch_main
         return stitch_main(rest)
+
+    if cmd == "debug-prompt":
+        from .extract.debug_cli import main as debug_main
+        return debug_main(rest)
 
     if cmd == "mcp":
         try:
