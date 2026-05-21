@@ -56,7 +56,7 @@ between steps — go straight through to a rendered mp4.
      },
      "video": [ /* strict sequence: no gaps, no overlaps, covers [0, duration] */ ],
      "audio": [ { "start": 0.0, "end": <duration>, "kind": "voiceover" } ],
-     "ost":   [ /* OST cues with style ∈ {bold_yellow, red_strike, neon_pink, white_pop, comment_trap} */ ]
+     "ost":   [ /* OST cues; style ∈ {dark, light, yellow_punch, red_alert, pink_reveal}; position ∈ {top, middle, bottom} */ ]
    }
    ```
 
@@ -68,9 +68,12 @@ between steps — go straight through to a rendered mp4.
    - `source_in` is optional but recommended; default 0.0.
    - `audio` and `ost` cues may overlap each other but must stay within
      `[0, output.duration]`.
-   - Map the user's freeform OST styling to the closest preset:
-     `bold_yellow` (hook), `red_strike` (negative/wrong), `neon_pink`
-     (reveal/positive), `white_pop` (emphasis), `comment_trap` (CTA).
+   - OST captions render as a rounded-rectangle padded box with a heavy
+     bold caption inside (YouTube Shorts style). Pick a `style` +
+     `position`. Style options: `dark` (default neutral subtitle),
+     `light` (white box / dark text), `yellow_punch` (hook), `red_alert`
+     (negative/wrong/before), `pink_reveal` (reveal/positive/after).
+     Position options: `top`, `middle`, `bottom` (default `bottom`).
 6. **Validate.** Call `validate_edl(edl)`. If `ok=false`, read the
    `issues` array, fix the EDL (swap a different clip, adjust `source_in`,
    shorten a cue), and re-validate. Loop until `ok=true`. Never skip this.

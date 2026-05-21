@@ -11,7 +11,8 @@ EDL_SCHEMA_VERSION = 1
 
 ReframeMode = Literal["crop_center", "crop_left", "crop_right", "letterbox"]
 AudioKind = Literal["voiceover", "clip_audio", "silence"]
-OSTStyle = Literal["bold_yellow", "red_strike", "neon_pink", "white_pop", "comment_trap"]
+OSTStyle = Literal["dark", "light", "yellow_punch", "red_alert", "pink_reveal"]
+OSTPosition = Literal["top", "middle", "bottom"]
 TTSBackendName = Literal["elevenlabs"]
 EffectKind = Literal["none", "freeze_first", "ken_burns_in", "ken_burns_out", "slow_mo"]
 TransitionKind = Literal["cut", "crossfade"]
@@ -83,7 +84,8 @@ class EDLOSTCue(BaseModel):
     start: float
     end: float
     text: str
-    style: OSTStyle = "white_pop"
+    style: OSTStyle = "dark"
+    position: OSTPosition = "bottom"
 
 
 class EDL(BaseModel):

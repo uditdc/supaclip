@@ -14,6 +14,7 @@ from supaclip.core.edl import (
 )
 from supaclip.stitch.assembly import CueInput, RenderInputs, build_command
 from supaclip.stitch.music import build_music_plan
+from supaclip.stitch.overlay import OSTRender
 
 
 def _two_cue_edl(duration: float = 4.0, with_vo: bool = True) -> tuple[EDL, list[CueInput]]:
@@ -26,7 +27,7 @@ def _two_cue_edl(duration: float = 4.0, with_vo: bool = True) -> tuple[EDL, list
             EDLVideoCue(start=duration / 2, end=duration, clip_id=2),
         ],
         audio=[EDLAudioCue(start=0.0, end=duration, kind="voiceover")] if with_vo else [],
-        ost=[EDLOSTCue(start=0.5, end=1.5, text="HOOK", style="bold_yellow")],
+        ost=[EDLOSTCue(start=0.5, end=1.5, text="HOOK", style="yellow_punch")],
     )
     cues = [
         CueInput(file_path="/tmp/a.mp4", cue=edl.video[0],
@@ -43,20 +44,30 @@ def test_build_command_two_cues_with_voiceover(tmp_path):
     edl, cues = _two_cue_edl()
     vo_wav = tmp_path / "vo.wav"
     vo_wav.write_bytes(b"x")
+    ost_png = tmp_path / "hook.png"
+    ost_png.write_bytes(b"\x89PNG\r\n")
+    ost_renders = [OSTRender(
+        cue_index=0, png_path=ost_png, x=100, y=1400, start=0.5, end=1.5,
+    )]
     args = build_command(
-        RenderInputs(edl=edl, cues=cues, voiceover_wav=str(vo_wav)),
+        RenderInputs(
+            edl=edl, cues=cues,
+            voiceover_wav=str(vo_wav),
+            ost_renders=ost_renders,
+        ),
         tmp_path / "out.mp4",
     )
 
-    cmd = " ".join(args)
-    assert args.count("-i") == 3
+    assert args.count("-i") == 4  # 2 video + voiceover + 1 OST png
     assert "/tmp/a.mp4" in args
     assert "/tmp/b.mp4" in args
     assert str(vo_wav) in args
+    assert str(ost_png) in args
     assert "-filter_complex" in args
     fc = args[args.index("-filter_complex") + 1]
     assert "concat=n=2:v=1:a=0[vj1]" in fc
-    assert "drawtext=" in fc
+    assert "overlay=x=100:y=1400" in fc
+    assert "enable='between(t,0.500,1.500)'" in fc
     assert "[avo]" in fc
     assert "-map" in args
     assert "[vout]" in args and "[aout]" in args

@@ -71,9 +71,9 @@ class EDLOSTCue(BaseModel):
     end: float
     text: str
     style: Literal[
-        "bold_yellow", "red_strike", "neon_pink",
-        "white_pop", "comment_trap"
-    ] = "white_pop"
+        "dark", "light", "yellow_punch", "red_alert", "pink_reveal"
+    ] = "dark"
+    position: Literal["top", "middle", "bottom"] = "bottom"
 
 class EDL(BaseModel):
     schema_version: int = 1

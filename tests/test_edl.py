@@ -30,7 +30,7 @@ def _basic_edl(duration: float = 10.0, with_voiceover: bool = True) -> EDL:
             EDLVideoCue(start=5.0, end=duration, clip_id=2),
         ],
         audio=[EDLAudioCue(start=0.0, end=duration, kind="voiceover")] if with_voiceover else [],
-        ost=[EDLOSTCue(start=0.0, end=2.0, text="HOOK", style="bold_yellow")],
+        ost=[EDLOSTCue(start=0.0, end=2.0, text="HOOK", style="yellow_punch")],
     )
 
 

@@ -14,6 +14,7 @@ from supaclip.stitch.progress import ProgressEvent, run_ffmpeg_with_progress
 from supaclip.core.log import Logger
 from supaclip.stitch.assembly import CueInput, RenderInputs, build_command
 from supaclip.stitch.music import build_music_plan, resolve_music_file
+from supaclip.stitch.overlay import render_ost_pngs
 from supaclip.stitch.tts import get_backend
 from supaclip.stitch.tts.cache import TTSCache
 
@@ -103,6 +104,19 @@ def render(
             voiceover_sidechain_label=None,
         )
 
+    ost_renders = []
+    if edl.ost:
+        log.stage("render OST captions")
+        ost_cache = Path(config.cache_dir).expanduser() / "ost"
+        ost_renders = render_ost_pngs(
+            cues=edl.ost,
+            out_w=edl.output.width,
+            out_h=edl.output.height,
+            cache_dir=ost_cache,
+            fontfile=config.fontfile,
+        )
+        log.info(f"rendered {len(ost_renders)} OST png(s) -> {ost_cache}")
+
     log.stage("render")
     inputs = RenderInputs(
         edl=edl, cues=cue_inputs,
@@ -110,6 +124,7 @@ def render(
         fontfile=config.fontfile,
         music_path=music_path,
         music_plan=music_plan,
+        ost_renders=ost_renders,
     )
     out_path = Path(config.output_path).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)

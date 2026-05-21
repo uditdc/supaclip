@@ -101,7 +101,8 @@ def test_render_end_to_end_with_catalog(tmp_path: Path):
             EDLVideoCue(start=2.0, end=4.0, clip_id=clip_ids[1], source_in=0.0),
         ],
         audio=[EDLAudioCue(start=0.0, end=4.0, kind="voiceover")],
-        ost=[EDLOSTCue(start=0.5, end=2.0, text="HELLO", style="white_pop")],
+        ost=[EDLOSTCue(start=0.5, end=2.0, text="HELLO", style="dark",
+                       position="bottom")],
     )
     edl_path = tmp_path / "edl.json"
     save_edl(edl, edl_path)
@@ -193,7 +194,8 @@ def test_render_v11_features_end_to_end(tmp_path: Path):
                        effect="slow_mo", effect_params={"speed": 0.5}),
         ],
         audio=[EDLAudioCue(start=0.0, end=8.0, kind="voiceover")],
-        ost=[EDLOSTCue(start=0.5, end=2.0, text="FREEZE", style="bold_yellow")],
+        ost=[EDLOSTCue(start=0.5, end=2.0, text="FREEZE", style="yellow_punch",
+                       position="top")],
         annotations=[EDLAnnotation(start=0.5, end=1.8, shape="circle",
                                      x=240, y=400, radius=80)],
     )

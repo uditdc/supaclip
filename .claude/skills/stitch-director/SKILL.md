@@ -72,7 +72,8 @@ is empty or an MCP tool returns an unrecoverable error.**
     { "start": 0.0, "end": 38.0, "kind": "voiceover" }
   ],
   "ost": [
-    { "start": 0.0, "end": 4.5, "text": "12 YEARS FOR THIS?", "style": "bold_yellow" }
+    { "start": 0.0, "end": 4.5, "text": "12 YEARS FOR THIS?",
+      "style": "yellow_punch", "position": "top" }
   ],
   "annotations": [
     { "start": 5.0, "end": 9.0, "shape": "circle",
@@ -98,15 +99,24 @@ is empty or an MCP tool returns an unrecoverable error.**
 
 ## OST style vocabulary (5 presets — map user wording)
 
-| User wording | preset |
-|---|---|
-| "bold yellow", "hook", "headline" | `bold_yellow` |
-| "red strikethrough", "wrong", "negative", "before" | `red_strike` |
-| "neon pink", "reveal", "after", "positive" | `neon_pink` |
-| "white pop", "emphasis", "big white text" | `white_pop` |
-| "comment trap", "CTA", "👇", "bottom prompt" | `comment_trap` |
+Captions are rendered as a rounded-rectangle padded background with a
+heavy bold caption inside (YouTube Shorts staple). Pick `style` + `position`:
 
-If a style is unclear, default to `white_pop`.
+| User wording | `style` |
+|---|---|
+| (default), "subtitle", "neutral", "standard caption" | `dark` |
+| "light caption", "white box", "black on white" | `light` |
+| "bold yellow", "hook", "headline", "punch" | `yellow_punch` |
+| "red", "wrong", "negative", "before", "alert" | `red_alert` |
+| "neon pink", "reveal", "after", "positive" | `pink_reveal` |
+
+If a style is unclear, default to `dark`.
+
+| User wording | `position` |
+|---|---|
+| "at the top", "above" | `top` |
+| "center", "middle of frame" | `middle` |
+| (default), "bottom", "CTA", "👇", "lower third" | `bottom` |
 
 ## Effect mapping (2.5)
 

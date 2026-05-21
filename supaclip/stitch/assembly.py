@@ -7,7 +7,7 @@ from supaclip.core.edl import EDL, EDLVideoCue, ReframeMode
 from supaclip.stitch.annotation import build_annotation_chain
 from supaclip.stitch.effects import plan_effect
 from supaclip.stitch.music import MusicPlan
-from supaclip.stitch.overlay import build_ost_chain
+from supaclip.stitch.overlay import OSTRender, build_ost_overlay_chain
 from supaclip.stitch.reframe import build_reframe_filter
 from supaclip.stitch.transitions import build_join_chain, needs_xfade_chain
 
@@ -33,6 +33,7 @@ class RenderInputs:
     fontfile: str | None = None
     music_path: str | None = None
     music_plan: MusicPlan | None = None
+    ost_renders: list[OSTRender] = field(default_factory=list)
     video_bitrate: str = "8M"
     audio_bitrate: str = "192k"
     preset: str = "medium"
@@ -70,6 +71,17 @@ def build_command(inputs: RenderInputs, output_path: str | Path) -> list[str]:
         music_index = len(inputs.cues) + (1 if voiceover_index is not None else 0)
         args += ["-i", inputs.music_path]
 
+    ost_input_indices: list[int] = []
+    next_index = (
+        len(inputs.cues)
+        + (1 if voiceover_index is not None else 0)
+        + (1 if music_index is not None else 0)
+    )
+    for render in inputs.ost_renders:
+        ost_input_indices.append(next_index)
+        args += ["-i", str(render.png_path)]
+        next_index += 1
+
     chains: list[str] = []
     video_labels: list[str] = []
     for i, cue_input in enumerate(inputs.cues):
@@ -95,11 +107,12 @@ def build_command(inputs: RenderInputs, output_path: str | Path) -> list[str]:
     if ann_chain:
         chains.append(f"{vjoined}{ann_chain}{after_ann_label}")
 
-    ost_chain = build_ost_chain(edl.ost, fontfile=inputs.fontfile)
-    if ost_chain:
-        chains.append(f"{after_ann_label}{ost_chain}[vout]")
-    else:
-        chains.append(f"{after_ann_label}null[vout]")
+    chains.extend(build_ost_overlay_chain(
+        renders=inputs.ost_renders,
+        input_indices=ost_input_indices,
+        base_label=after_ann_label,
+        final_label="[vout]",
+    ))
 
     audio_labels: list[str] = []
     clip_audio_cues = [c for c in edl.audio if c.kind == "clip_audio"]

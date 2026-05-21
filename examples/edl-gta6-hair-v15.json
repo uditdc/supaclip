@@ -23,11 +23,11 @@
     { "start": 0.0, "end": 38.0, "kind": "voiceover" }
   ],
   "ost": [
-    { "start":  0.0, "end":  4.5, "text": "12 YEARS FOR THIS?",       "style": "bold_yellow" },
-    { "start":  5.0, "end": 14.0, "text": "GTA 5: STATIC MESH",        "style": "red_strike" },
-    { "start": 15.0, "end": 22.0, "text": "GTA 6: PROCEDURAL STRANDS", "style": "neon_pink" },
-    { "start": 22.0, "end": 30.0, "text": "EVERY. SINGLE. STRAND.",    "style": "white_pop" },
-    { "start": 35.0, "end": 38.0, "text": "WHICH SIDE LOOKS REAL?",    "style": "comment_trap" }
+    { "start":  0.0, "end":  4.5, "text": "12 YEARS FOR THIS?",       "style": "yellow_punch", "position": "top" },
+    { "start":  5.0, "end": 14.0, "text": "GTA 5: STATIC MESH",        "style": "red_alert",    "position": "bottom" },
+    { "start": 15.0, "end": 22.0, "text": "GTA 6: PROCEDURAL STRANDS", "style": "pink_reveal",  "position": "bottom" },
+    { "start": 22.0, "end": 30.0, "text": "EVERY. SINGLE. STRAND.",    "style": "dark",         "position": "middle" },
+    { "start": 35.0, "end": 38.0, "text": "WHICH SIDE LOOKS REAL?",    "style": "light",        "position": "bottom" }
   ],
   "annotations": [
     { "start": 5.0, "end": 9.0, "shape": "circle",

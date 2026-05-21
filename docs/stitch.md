@@ -44,11 +44,11 @@ script.md  ──▶  Claude (via MCP)
   ],
 
   "ost": [
-    { "start":  0.0, "end":  4.5, "text": "12 YEARS FOR THIS?",       "style": "bold_yellow" },
-    { "start":  5.0, "end": 14.0, "text": "GTA 5: STATIC MESH",        "style": "red_strike" },
-    { "start": 15.0, "end": 22.0, "text": "GTA 6: PROCEDURAL STRANDS", "style": "neon_pink" },
-    { "start": 22.0, "end": 30.0, "text": "EVERY. SINGLE. STRAND.",    "style": "white_pop" },
-    { "start": 35.0, "end": 38.0, "text": "WHICH SIDE LOOKS REAL?",    "style": "comment_trap" }
+    { "start":  0.0, "end":  4.5, "text": "12 YEARS FOR THIS?",       "style": "yellow_punch", "position": "top" },
+    { "start":  5.0, "end": 14.0, "text": "GTA 5: STATIC MESH",        "style": "red_alert",    "position": "bottom" },
+    { "start": 15.0, "end": 22.0, "text": "GTA 6: PROCEDURAL STRANDS", "style": "pink_reveal",  "position": "bottom" },
+    { "start": 22.0, "end": 30.0, "text": "EVERY. SINGLE. STRAND.",    "style": "dark",         "position": "middle" },
+    { "start": 35.0, "end": 38.0, "text": "WHICH SIDE LOOKS REAL?",    "style": "light",        "position": "bottom" }
   ]
 }
 ```
@@ -64,8 +64,13 @@ Rules:
   The cue's duration on the source clip is `end - start`.
 - `reframe` is `crop_center` (default), `crop_left`, `crop_right`, or
   `letterbox`.
-- OST `style` is one of `bold_yellow`, `red_strike`, `neon_pink`,
-  `white_pop`, `comment_trap` — see `supaclip/stitch/overlay.py`.
+- OST captions are rendered as transparent PNGs (rounded rect background +
+  heavy bold font, YouTube-Shorts style) and overlaid by ffmpeg.
+  - `style` ∈ `dark` (default), `light`, `yellow_punch`, `red_alert`,
+    `pink_reveal` — see `supaclip/stitch/overlay.py:STYLE_PRESETS`.
+  - `position` ∈ `top`, `middle`, `bottom` (default `bottom`).
+  - Font: by default uses Open Sans ExtraBold / DejaVu Sans Bold; override
+    with `stitch render --fontfile <path/to/Bold.ttf>`.
 
 ### v1.1 additions (Phase 2.5, all optional)
 

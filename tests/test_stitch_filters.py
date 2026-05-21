@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from supaclip.core.edl import EDLOSTCue
 from supaclip.stitch.overlay import (
+    POSITION_Y_FRACTION,
     STYLE_PRESETS,
-    _escape_drawtext,
-    build_drawtext,
-    build_ost_chain,
+    build_ost_overlay_chain,
+    render_caption_png,
+    render_ost_pngs,
 )
 from supaclip.stitch.reframe import build_reframe_filter
 
@@ -39,62 +44,85 @@ def test_reframe_custom_dimensions():
     assert "fps=30" in f
 
 
-def test_drawtext_escapes_special_chars():
-    cue = EDLOSTCue(start=0, end=1, text="A: B% C\\D", style="white_pop")
-    out = build_drawtext(cue)
-    assert r"\:" in out
-    assert r"\%" in out
-    assert r"\\" in out
-
-
-def test_drawtext_emits_enable_window():
-    cue = EDLOSTCue(start=1.5, end=4.25, text="x", style="white_pop")
-    out = build_drawtext(cue)
-    assert "enable='between(t,1.500,4.250)'" in out
-
-
-def test_drawtext_includes_style_attrs():
-    cue = EDLOSTCue(start=0, end=1, text="hi", style="bold_yellow")
-    out = build_drawtext(cue)
-    preset = STYLE_PRESETS["bold_yellow"]
-    assert f"fontsize={preset.fontsize}" in out
-    assert f"fontcolor={preset.fontcolor}" in out
-    assert f"borderw={preset.borderw}" in out
-
-
-def test_drawtext_box_only_when_preset_enables_it():
-    no_box = build_drawtext(EDLOSTCue(start=0, end=1, text="x", style="white_pop"))
-    with_box = build_drawtext(EDLOSTCue(start=0, end=1, text="x", style="comment_trap"))
-    assert "box=1" not in no_box
-    assert "box=1" in with_box
-
-
-def test_drawtext_fontfile_optional():
-    cue = EDLOSTCue(start=0, end=1, text="x", style="white_pop")
-    assert "fontfile=" not in build_drawtext(cue)
-    assert "fontfile=/usr/share/fonts/x.ttf" in build_drawtext(
-        cue, fontfile="/usr/share/fonts/x.ttf"
-    )
-
-
-def test_ost_chain_joins_with_comma():
-    cues = [
-        EDLOSTCue(start=0, end=1, text="A", style="white_pop"),
-        EDLOSTCue(start=1, end=2, text="B", style="bold_yellow"),
-    ]
-    chain = build_ost_chain(cues)
-    assert chain.count("drawtext=") == 2
-    assert ",drawtext=" in chain
-
-
-def test_ost_chain_empty():
-    assert build_ost_chain([]) == ""
-
-
 def test_all_styles_have_presets():
-    for style in ("bold_yellow", "red_strike", "neon_pink", "white_pop", "comment_trap"):
+    for style in ("dark", "light", "yellow_punch", "red_alert", "pink_reveal"):
         assert style in STYLE_PRESETS
 
 
-def test_escape_drawtext_idempotent_on_safe_text():
-    assert _escape_drawtext("HELLO WORLD") == "HELLO WORLD"
+def test_position_fractions_cover_all_positions():
+    assert set(POSITION_Y_FRACTION) == {"top", "middle", "bottom"}
+
+
+def test_render_caption_png_produces_file(tmp_path: Path):
+    dest = tmp_path / "cap.png"
+    w, h = render_caption_png(
+        text="hello world",
+        style_name="dark",
+        out_w=1080,
+        fontfile=None,
+        dest=dest,
+    )
+    assert dest.exists()
+    assert w > 0 and h > 0
+    # rounded box fits within reasonable bounds
+    assert w <= int(1080 * 0.86) + 8
+
+
+def test_render_ost_pngs_returns_one_per_cue(tmp_path: Path):
+    cues = [
+        EDLOSTCue(start=0, end=1, text="A", style="dark", position="top"),
+        EDLOSTCue(start=1, end=2, text="B", style="light", position="bottom"),
+    ]
+    renders = render_ost_pngs(cues, out_w=1080, out_h=1920, cache_dir=tmp_path)
+    assert len(renders) == 2
+    assert renders[0].y < renders[1].y  # top is above bottom
+    assert all(r.png_path.exists() for r in renders)
+
+
+def test_render_ost_pngs_centers_horizontally(tmp_path: Path):
+    cues = [EDLOSTCue(start=0, end=1, text="Hi", style="dark", position="middle")]
+    [r] = render_ost_pngs(cues, out_w=1080, out_h=1920, cache_dir=tmp_path)
+    # x should be roughly centered (not at 0 or pinned to one edge)
+    assert 50 < r.x < 1080 - 50
+
+
+def test_render_ost_pngs_uses_content_hash_cache(tmp_path: Path):
+    cue = EDLOSTCue(start=0, end=1, text="same", style="dark")
+    [r1] = render_ost_pngs([cue], out_w=1080, out_h=1920, cache_dir=tmp_path)
+    [r2] = render_ost_pngs([cue], out_w=1080, out_h=1920, cache_dir=tmp_path)
+    assert r1.png_path == r2.png_path
+
+
+def test_build_overlay_chain_handles_empty():
+    chains = build_ost_overlay_chain(
+        renders=[], input_indices=[], base_label="[vann]", final_label="[vout]"
+    )
+    assert chains == ["[vann]null[vout]"]
+
+
+def test_build_overlay_chain_chains_multiple(tmp_path: Path):
+    cues = [
+        EDLOSTCue(start=0.0, end=1.0, text="A", style="dark"),
+        EDLOSTCue(start=1.0, end=2.0, text="B", style="yellow_punch"),
+    ]
+    renders = render_ost_pngs(cues, out_w=1080, out_h=1920, cache_dir=tmp_path)
+    chains = build_ost_overlay_chain(
+        renders=renders, input_indices=[5, 6],
+        base_label="[vann]", final_label="[vout]",
+    )
+    assert len(chains) == 2
+    assert chains[0].startswith("[vann][5:v]overlay=")
+    assert "enable='between(t,0.000,1.000)'" in chains[0]
+    assert chains[1].startswith("[vost0][6:v]overlay=")
+    assert chains[-1].endswith("[vout]")
+
+
+def test_render_caption_png_fontfile_missing(tmp_path: Path):
+    with pytest.raises(FileNotFoundError):
+        render_caption_png(
+            text="x",
+            style_name="dark",
+            out_w=1080,
+            fontfile="/tmp/does-not-exist.ttf",
+            dest=tmp_path / "x.png",
+        )
