@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 import pytest
 
-from clipper.stitch.tts.base import normalize_settings
-from clipper.stitch.tts.cache import TTSCache
-from clipper.stitch.tts.elevenlabs import (
+from supaclip.stitch.tts.base import normalize_settings
+from supaclip.stitch.tts.cache import TTSCache
+from supaclip.stitch.tts.elevenlabs import (
     ElevenLabsBackend,
     ElevenLabsError,
     _to_voice_settings,
@@ -112,7 +112,7 @@ def test_synthesize_posts_and_writes_wav(tmp_path):
     backend = ElevenLabsBackend(api_key="k", opener=opener)
     out_path = tmp_path / "voice.wav"
 
-    with patch("clipper.stitch.tts.elevenlabs.run_ffmpeg") as mock_ff:
+    with patch("supaclip.stitch.tts.elevenlabs.run_ffmpeg") as mock_ff:
         def fake_ff(args):
             Path(args[-1]).write_bytes(b"RIFFfake")
             return ""

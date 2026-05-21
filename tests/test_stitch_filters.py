@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from clipper.core.edl import EDLOSTCue
-from clipper.stitch.overlay import (
+from supaclip.core.edl import EDLOSTCue
+from supaclip.stitch.overlay import (
     STYLE_PRESETS,
     _escape_drawtext,
     build_drawtext,
     build_ost_chain,
 )
-from clipper.stitch.reframe import build_reframe_filter
+from supaclip.stitch.reframe import build_reframe_filter
 
 
 def test_reframe_crop_center():

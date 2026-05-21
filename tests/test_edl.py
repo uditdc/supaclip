@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from clipper.core.edl import (
+from supaclip.core.edl import (
     EDL,
     EDL_SCHEMA_VERSION,
     EDLAnnotation,

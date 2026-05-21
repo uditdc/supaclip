@@ -3,13 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from clipper.core.edl import EDL, EDLVideoCue, ReframeMode
-from clipper.stitch.annotation import build_annotation_chain
-from clipper.stitch.effects import plan_effect
-from clipper.stitch.music import MusicPlan
-from clipper.stitch.overlay import build_ost_chain
-from clipper.stitch.reframe import build_reframe_filter
-from clipper.stitch.transitions import build_join_chain, needs_xfade_chain
+from supaclip.core.edl import EDL, EDLVideoCue, ReframeMode
+from supaclip.stitch.annotation import build_annotation_chain
+from supaclip.stitch.effects import plan_effect
+from supaclip.stitch.music import MusicPlan
+from supaclip.stitch.overlay import build_ost_chain
+from supaclip.stitch.reframe import build_reframe_filter
+from supaclip.stitch.transitions import build_join_chain, needs_xfade_chain
 
 
 @dataclass
@@ -123,7 +123,7 @@ def build_command(inputs: RenderInputs, output_path: str | Path) -> list[str]:
         audio_labels.append("[avo]")
 
     if inputs.music_plan is not None and music_index is not None:
-        from clipper.stitch.music import build_music_plan
+        from supaclip.stitch.music import build_music_plan
         music_plan = build_music_plan(
             music=edl.music,  # type: ignore[arg-type]
             music_input_index=music_index,

@@ -65,7 +65,7 @@ Rules:
 - `reframe` is `crop_center` (default), `crop_left`, `crop_right`, or
   `letterbox`.
 - OST `style` is one of `bold_yellow`, `red_strike`, `neon_pink`,
-  `white_pop`, `comment_trap` — see `clipper/stitch/overlay.py`.
+  `white_pop`, `comment_trap` — see `supaclip/stitch/overlay.py`.
 
 ### v1.1 additions (Phase 2.5, all optional)
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from clipper.core.edl import EDLAnnotation
+from supaclip.core.edl import EDLAnnotation
 
 
 def _hex_to_ffcolor(color: str) -> str:

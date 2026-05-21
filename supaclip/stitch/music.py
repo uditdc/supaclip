@@ -4,8 +4,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from clipper.catalog.search import get_clip
-from clipper.core.edl import EDLMusic
+from supaclip.catalog.search import get_clip
+from supaclip.core.edl import EDLMusic
 
 
 @dataclass

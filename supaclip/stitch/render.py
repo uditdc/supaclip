@@ -6,16 +6,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from clipper.catalog import connect, resolve_catalog_path
-from clipper.catalog.search import ClipRow, get_clip
-from clipper.core.edl import EDL, load_edl, save_edl, validate_edl
-from clipper.core.ffmpeg import ensure_ffmpeg, probe, run_ffmpeg
-from clipper.stitch.progress import ProgressEvent, run_ffmpeg_with_progress
-from clipper.core.log import Logger
-from clipper.stitch.assembly import CueInput, RenderInputs, build_command
-from clipper.stitch.music import build_music_plan, resolve_music_file
-from clipper.stitch.tts import get_backend
-from clipper.stitch.tts.cache import TTSCache
+from supaclip.catalog import connect, resolve_catalog_path
+from supaclip.catalog.search import ClipRow, get_clip
+from supaclip.core.edl import EDL, load_edl, save_edl, validate_edl
+from supaclip.core.ffmpeg import ensure_ffmpeg, probe, run_ffmpeg
+from supaclip.stitch.progress import ProgressEvent, run_ffmpeg_with_progress
+from supaclip.core.log import Logger
+from supaclip.stitch.assembly import CueInput, RenderInputs, build_command
+from supaclip.stitch.music import build_music_plan, resolve_music_file
+from supaclip.stitch.tts import get_backend
+from supaclip.stitch.tts.cache import TTSCache
 
 
 DEFAULT_CACHE_DIR = "~/.cache/supaclip"

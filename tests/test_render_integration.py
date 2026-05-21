@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from clipper.core.edl import (
+from supaclip.core.edl import (
     EDL,
     EDLAudioCue,
     EDLOSTCue,
@@ -16,7 +16,7 @@ from clipper.core.edl import (
     EDLVoiceover,
     save_edl,
 )
-from clipper.core.ffmpeg import probe
+from supaclip.core.ffmpeg import probe
 
 
 def _has_ffmpeg() -> bool:
@@ -43,8 +43,8 @@ def _make_voiceover_wav(path: Path, duration: float) -> None:
 
 @pytest.mark.skipif(not _has_ffmpeg(), reason="ffmpeg not installed")
 def test_render_end_to_end_with_catalog(tmp_path: Path):
-    from clipper.catalog import add_manifest, connect
-    from clipper.core.manifest import (
+    from supaclip.catalog import add_manifest, connect
+    from supaclip.core.manifest import (
         Clip,
         ExtractInfo,
         Manifest,
@@ -52,7 +52,7 @@ def test_render_end_to_end_with_catalog(tmp_path: Path):
         now_iso,
         save_manifest,
     )
-    from clipper.stitch.render import RenderConfig, render
+    from supaclip.stitch.render import RenderConfig, render
 
     clips_dir = tmp_path / "clips"
     clips_dir.mkdir()
@@ -119,7 +119,7 @@ def test_render_end_to_end_with_catalog(tmp_path: Path):
         use_cache=True,
     )
 
-    with patch("clipper.stitch.render._synthesize", return_value=vo_wav):
+    with patch("supaclip.stitch.render._synthesize", return_value=vo_wav):
         result = render(cfg)
 
     assert Path(result.output).exists()
@@ -135,9 +135,9 @@ def test_render_end_to_end_with_catalog(tmp_path: Path):
 def test_render_v11_features_end_to_end(tmp_path: Path):
     """Render an EDL exercising freeze_first + crossfade + slow_mo + ken_burns
     + an annotation; probe the output."""
-    from clipper.catalog import add_manifest, connect
-    from clipper.core.edl import EDLAnnotation, EDLVideoCue
-    from clipper.core.manifest import (
+    from supaclip.catalog import add_manifest, connect
+    from supaclip.core.edl import EDLAnnotation, EDLVideoCue
+    from supaclip.core.manifest import (
         Clip,
         ExtractInfo,
         Manifest,
@@ -145,7 +145,7 @@ def test_render_v11_features_end_to_end(tmp_path: Path):
         now_iso,
         save_manifest,
     )
-    from clipper.stitch.render import RenderConfig, render
+    from supaclip.stitch.render import RenderConfig, render
 
     clips_dir = tmp_path / "clips"
     clips_dir.mkdir()
@@ -211,7 +211,7 @@ def test_render_v11_features_end_to_end(tmp_path: Path):
         cache_dir=str(tmp_path / "cache"),
         use_cache=True,
     )
-    with patch("clipper.stitch.render._synthesize", return_value=vo_wav):
+    with patch("supaclip.stitch.render._synthesize", return_value=vo_wav):
         result = render(cfg)
 
     info = probe(result.output)
@@ -224,11 +224,11 @@ def test_render_v11_features_end_to_end(tmp_path: Path):
 @pytest.mark.skipif(not _has_ffmpeg(), reason="ffmpeg not installed")
 def test_render_print_ffmpeg_skips_execution(tmp_path: Path, capsys):
     """--print-ffmpeg should write the command to stdout without running."""
-    from clipper.catalog import add_manifest, connect
-    from clipper.core.manifest import (
+    from supaclip.catalog import add_manifest, connect
+    from supaclip.core.manifest import (
         Clip, ExtractInfo, Manifest, SourceInfo, now_iso, save_manifest,
     )
-    from clipper.stitch.render import RenderConfig, render
+    from supaclip.stitch.render import RenderConfig, render
 
     clips_dir = tmp_path / "clips"
     clips_dir.mkdir()

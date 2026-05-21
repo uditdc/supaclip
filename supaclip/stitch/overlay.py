@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from clipper.core.edl import EDLOSTCue, OSTStyle
+from supaclip.core.edl import EDLOSTCue, OSTStyle
 
 
 @dataclass(frozen=True)

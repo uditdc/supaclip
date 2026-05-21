@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from clipper.extract.backends._shared import _coerce, _prune_overlaps
-from clipper.extract.backends.gemma import _frame_count_for
-from clipper.extract.analyze import SegmentEvent
-from clipper.extract.profiles import GTA_PROFILE
+from supaclip.extract.backends._shared import _coerce, _prune_overlaps
+from supaclip.extract.backends.gemma import _frame_count_for
+from supaclip.extract.analyze import SegmentEvent
+from supaclip.extract.profiles import GTA_PROFILE
 
 
 def test_coerce_parses_multiple_events_and_sorts_by_start():

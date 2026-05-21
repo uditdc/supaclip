@@ -27,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--interval", type=float, default=60.0, help="window length for interval strategy")
     p.add_argument("--game-profile", default="gta", help="built-in profile name or path to JSON")
     p.add_argument("--analyzer", choices=("gemma", "gemma-video"), default="gemma")
-    p.add_argument("--llm", default=None, help="analyzer model id (default: env CLIPPER_LLM or gemma4)")
+    p.add_argument("--llm", default=None, help="analyzer model id (default: env LLM_MODEL or gemma4)")
     p.add_argument("--base-url", default=None, help="OpenAI-compatible endpoint")
     p.add_argument("--api-key", default=None, help="API key (unused for local Ollama)")
     p.add_argument("--keyframes", type=int, default=3)
@@ -69,11 +69,11 @@ def main(argv: list[str] | None = None) -> int:
     log = Logger(verbose=args.verbose)
 
     base_url = args.base_url or _env(
-        "CLIPPER_BASE_URL", "LLM_BASE_URL", "OPENAI_BASE_URL",
+        "LLM_BASE_URL", "OPENAI_BASE_URL",
         default="http://localhost:11434/v1",
     )
-    api_key = args.api_key or _env("CLIPPER_API_KEY", "LLM_API_KEY", "OPENAI_API_KEY")
-    llm = args.llm or _env("CLIPPER_LLM", "LLM_MODEL", default="gemma4")
+    api_key = args.api_key or _env("LLM_API_KEY", "OPENAI_API_KEY")
+    llm = args.llm or _env("LLM_MODEL", default="gemma4")
 
     if args.segmenter == "manual" and not args.timestamps:
         parser.error("--segmenter manual requires --timestamps FILE")

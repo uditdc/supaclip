@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 import pytest
 
-from clipper.core.cache import Cache, fingerprint_file
-from clipper.core.manifest import (
+from supaclip.core.cache import Cache, fingerprint_file
+from supaclip.core.manifest import (
     AudioInfo,
     Clip,
     ExtractInfo,
@@ -19,11 +19,11 @@ from clipper.core.manifest import (
     now_iso,
     save_manifest,
 )
-from clipper.extract.analyze import blend_score
-from clipper.extract.audio import audio_factor_for_range, detect_peaks, peak_loudness_db
-from clipper.extract.dedupe import iou, merge_overlapping
-from clipper.extract.profiles import GTA_PROFILE, load_profile
-from clipper.extract.segment import (
+from supaclip.extract.analyze import blend_score
+from supaclip.extract.audio import audio_factor_for_range, detect_peaks, peak_loudness_db
+from supaclip.extract.dedupe import iou, merge_overlapping
+from supaclip.extract.profiles import GTA_PROFILE, load_profile
+from supaclip.extract.segment import (
     clamp_ranges,
     format_timestamp,
     interval_segments,
@@ -217,7 +217,7 @@ def _has_ffmpeg() -> bool:
 
 @pytest.mark.skipif(not _has_ffmpeg(), reason="ffmpeg not installed")
 def test_ffmpeg_smoke_probe_cut_keyframes(tmp_path: Path):
-    from clipper.core.ffmpeg import cut_clip, extract_keyframes, probe
+    from supaclip.core.ffmpeg import cut_clip, extract_keyframes, probe
 
     src = tmp_path / "src.mp4"
     subprocess.run([
@@ -245,9 +245,9 @@ def test_ffmpeg_smoke_probe_cut_keyframes(tmp_path: Path):
 
 @pytest.mark.skipif(not _has_ffmpeg(), reason="ffmpeg not installed")
 def test_integration_pipeline_with_mocked_analyzer(tmp_path: Path):
-    from clipper.core.log import Logger
-    from clipper.extract.analyze import SegmentAnalysis, SegmentEvent
-    from clipper.extract.pipeline import ExtractConfig, run
+    from supaclip.core.log import Logger
+    from supaclip.extract.analyze import SegmentAnalysis, SegmentEvent
+    from supaclip.extract.pipeline import ExtractConfig, run
 
     src = tmp_path / "src.mp4"
     subprocess.run([
@@ -293,7 +293,7 @@ def test_integration_pipeline_with_mocked_analyzer(tmp_path: Path):
             audio_cues=["engine"],
         ),
     ])
-    with patch("clipper.extract.backends.gemma.GemmaBackend.analyze_segment", return_value=fake):
+    with patch("supaclip.extract.backends.gemma.GemmaBackend.analyze_segment", return_value=fake):
         manifests = run(cfg, Logger(verbose=False))
 
     assert len(manifests) == 1
@@ -312,7 +312,7 @@ def test_integration_pipeline_with_mocked_analyzer(tmp_path: Path):
 def test_help_is_fast():
     """--help must not trigger heavy imports."""
     res = subprocess.run(
-        ["python", "-m", "clipper.extract.cli", "--help"],
+        ["python", "-m", "supaclip.extract.cli", "--help"],
         capture_output=True, text=True, timeout=10,
         cwd=str(Path(__file__).resolve().parent.parent),
     )

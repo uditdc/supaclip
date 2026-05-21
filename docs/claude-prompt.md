@@ -8,7 +8,7 @@
 > fallback and as the canonical reference for the pipeline.
 
 Paste this prompt into a Claude Code session that has the `supaclip` MCP
-server registered (`claude mcp add supaclip "$(pwd)/.venv/bin/clipper-mcp"`).
+server registered (`claude mcp add supaclip "$(pwd)/.venv/bin/supaclip-mcp"`).
 Below the prompt template, paste your short-video script.
 
 ---
@@ -26,7 +26,7 @@ between steps — go straight through to a rendered mp4.
 **Pipeline:**
 
 1. **Inventory.** Call `catalog_stats` first. If `clips == 0`, stop and tell
-   me to run `clipper catalog add …` first.
+   me to run `supaclip catalog add …` first.
 2. **Plan the timeline.** Read the script and write down, internally, the
    target duration, the list of b-roll cues with their `(start, end)` window
    on the final timeline, the list of OST text overlays with their windows,

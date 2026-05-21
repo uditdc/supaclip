@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from clipper.core.edl import ReframeMode
+from supaclip.core.edl import ReframeMode
 
 DEFAULT_WIDTH = 1080
 DEFAULT_HEIGHT = 1920

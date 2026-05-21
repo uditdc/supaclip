@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from clipper.core.edl import EDLVideoCue
+from supaclip.core.edl import EDLVideoCue
 
 
 @dataclass(frozen=True)

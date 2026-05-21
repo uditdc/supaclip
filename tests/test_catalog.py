@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from clipper.catalog.db import connect
-from clipper.catalog.ingest import add_directory, add_manifest, remove_manifest
-from clipper.catalog.paths import resolve_catalog_path
-from clipper.catalog.schema import SCHEMA_VERSION, migrate
-from clipper.catalog.search import (
+from supaclip.catalog.db import connect
+from supaclip.catalog.ingest import add_directory, add_manifest, remove_manifest
+from supaclip.catalog.paths import resolve_catalog_path
+from supaclip.catalog.schema import SCHEMA_VERSION, migrate
+from supaclip.catalog.search import (
     get_clip,
     get_source,
     list_sources,
@@ -19,7 +19,7 @@ from clipper.catalog.search import (
     search,
     stats,
 )
-from clipper.core.manifest import (
+from supaclip.core.manifest import (
     AudioInfo,
     Clip,
     ExtractInfo,
@@ -122,10 +122,10 @@ def test_migrate_fresh_and_idempotent(tmp_path: Path):
 # ---------------------- paths ----------------------
 
 def test_resolve_catalog_path_priority(tmp_path: Path, monkeypatch):
-    monkeypatch.delenv("CLIPPER_CATALOG", raising=False)
+    monkeypatch.delenv("SUPACLIP_CATALOG", raising=False)
     assert resolve_catalog_path("/tmp/explicit.db") == Path("/tmp/explicit.db").resolve()
 
-    monkeypatch.setenv("CLIPPER_CATALOG", str(tmp_path / "env.db"))
+    monkeypatch.setenv("SUPACLIP_CATALOG", str(tmp_path / "env.db"))
     assert resolve_catalog_path() == (tmp_path / "env.db").resolve()
 
 
@@ -337,7 +337,7 @@ def test_parse_signal_filter():
 
 def test_cli_help_is_fast():
     res = subprocess.run(
-        [sys.executable, "-m", "clipper.cli", "--help"],
+        [sys.executable, "-m", "supaclip.cli", "--help"],
         capture_output=True, text=True, timeout=10,
     )
     assert res.returncode == 0
@@ -350,14 +350,14 @@ def test_cli_catalog_add_search_roundtrip(tmp_path: Path):
     env_args = ["--catalog", str(catalog_db)]
 
     add = subprocess.run(
-        [sys.executable, "-m", "clipper.cli", "catalog", *env_args,
+        [sys.executable, "-m", "supaclip.cli", "catalog", *env_args,
          "add", str(manifest_path)],
         capture_output=True, text=True, timeout=15,
     )
     assert add.returncode == 0, add.stderr
 
     srch = subprocess.run(
-        [sys.executable, "-m", "clipper.cli", "catalog", *env_args,
+        [sys.executable, "-m", "supaclip.cli", "catalog", *env_args,
          "search", "chase", "--json"],
         capture_output=True, text=True, timeout=15,
     )
@@ -373,12 +373,12 @@ def test_mcp_tools_callable_when_installed(tmp_path: Path, monkeypatch):
     pytest.importorskip("mcp")
     manifest_path = _write(tmp_path)
     catalog_db = tmp_path / "c.db"
-    monkeypatch.setenv("CLIPPER_CATALOG", str(catalog_db))
+    monkeypatch.setenv("SUPACLIP_CATALOG", str(catalog_db))
 
     conn = connect(catalog_db)
     add_manifest(conn, manifest_path)
     conn.close()
 
-    from clipper.catalog import mcp as mcp_mod
+    from supaclip.catalog import mcp as mcp_mod
     server = mcp_mod._build_server()
     assert server is not None  # build succeeded; tool decorators executed

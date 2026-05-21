@@ -19,9 +19,9 @@ pip install -e ".[dev]"
 
 Requires `ffmpeg` and `ffprobe` on `PATH`.
 
-Installs four entry points: `extract`, `stitch`, `clipper`, and (with the
-`[mcp]` extra) `clipper-mcp`. `clipper` is an umbrella dispatcher —
-`clipper extract …` and `extract …` are equivalent.
+Installs four entry points: `extract`, `stitch`, `supaclip`, and (with the
+`[mcp]` extra) `supaclip-mcp`. `supaclip` is an umbrella dispatcher —
+`supaclip extract …` and `extract …` are equivalent.
 
 ## Usage
 
@@ -50,7 +50,7 @@ extract session.mp4 --json
 ## Configuration
 
 Put a `.env` in the working directory (see `.env.example`). CLI flags override
-env vars. Variables: `CLIPPER_BASE_URL`, `CLIPPER_API_KEY`, `CLIPPER_LLM`
+env vars. Variables: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`
 (also accepts the `OPENAI_*` equivalents for the first two).
 
 ## Catalog
@@ -61,26 +61,26 @@ every clip you've ever extracted.
 
 ```bash
 # Ingest a manifest (or a directory; walks recursively)
-clipper catalog add clips/manifest.json
+supaclip catalog add clips/manifest.json
 
 # FTS5 query over description / audio cues / tags
-clipper catalog search "police chase"
+supaclip catalog search "police chase"
 
 # Structured filters compose freely
-clipper catalog search --category shootout --min-score 70
-clipper catalog search --category police_chase --category crash --all-categories
-clipper catalog search --signal wanted_level=4
-clipper catalog search --signal "vehicles~=police"
-clipper catalog search --min-duration 20 --order-by duration --json
+supaclip catalog search --category shootout --min-score 70
+supaclip catalog search --category police_chase --category crash --all-categories
+supaclip catalog search --signal wanted_level=4
+supaclip catalog search --signal "vehicles~=police"
+supaclip catalog search --min-duration 20 --order-by duration --json
 
 # Catalog admin
-clipper catalog list --sources
-clipper catalog stats
-clipper catalog remove clips/manifest.json
+supaclip catalog list --sources
+supaclip catalog stats
+supaclip catalog remove clips/manifest.json
 ```
 
 Catalog location: `~/.local/share/supaclip/catalog.db`. Override with
-`--catalog FILE` or the `CLIPPER_CATALOG` env var.
+`--catalog FILE` or the `SUPACLIP_CATALOG` env var.
 
 ## MCP server
 
@@ -90,9 +90,9 @@ Expose the catalog to Claude so it can query your library directly.
 pip install -e ".[mcp]"
 
 # Register with the ABSOLUTE path to the venv binary — Claude Code spawns
-# subprocesses without activating any venv, so `clipper-mcp` on its own
+# subprocesses without activating any venv, so `supaclip-mcp` on its own
 # won't be on PATH. The script has the venv's python in its shebang.
-claude mcp add supaclip "$(pwd)/.venv/bin/clipper-mcp"
+claude mcp add supaclip "$(pwd)/.venv/bin/supaclip-mcp"
 ```
 
 Pass env vars for non-default catalog or for the ElevenLabs key that
@@ -100,9 +100,9 @@ Pass env vars for non-default catalog or for the ElevenLabs key that
 
 ```bash
 claude mcp add supaclip \
-  --env CLIPPER_CATALOG=/path/to/catalog.db \
+  --env SUPACLIP_CATALOG=/path/to/catalog.db \
   --env ELEVENLABS_API_KEY=sk_... \
-  -- "$(pwd)/.venv/bin/clipper-mcp"
+  -- "$(pwd)/.venv/bin/supaclip-mcp"
 ```
 
 Tools exposed: `catalog_search`, `catalog_get_clip`, `catalog_get_source`,
@@ -171,5 +171,5 @@ make publish-test  # upload to TestPyPI
 make publish       # upload to PyPI
 ```
 
-The wheel installs `extract`, `stitch`, `clipper`, and `clipper-mcp`
+The wheel installs `extract`, `stitch`, `supaclip`, and `supaclip-mcp`
 entry points; users only need `ffmpeg`/`ffprobe` on `PATH` to run it.

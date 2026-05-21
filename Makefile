@@ -32,7 +32,7 @@ test:
 	$(BIN)/pytest
 
 clean:
-	rm -rf build/ dist/ *.egg-info clipper/*.egg-info
+	rm -rf build/ dist/ *.egg-info supaclip/*.egg-info
 	find . -type d -name __pycache__ -not -path './$(VENV)/*' -exec rm -rf {} +
 	find . -type d -name .pytest_cache -not -path './$(VENV)/*' -exec rm -rf {} +
 

@@ -37,13 +37,13 @@ dev = ["pytest>=8.0", "build>=1.2"]
 mcp = ["mcp>=1.0"]
 
 [project.scripts]
-extract = "clipper.extract.cli:main"
-stitch = "clipper.stitch.cli:main"
-clipper = "clipper.cli:main"
-clipper-mcp = "clipper.catalog.mcp:main"
+extract = "supaclip.extract.cli:main"
+stitch = "supaclip.stitch.cli:main"
+supaclip = "supaclip.cli:main"
+supaclip-mcp = "supaclip.catalog.mcp:main"
 
 [tool.setuptools.packages.find]
-include = ["clipper*"]
+include = ["supaclip*"]
 exclude = ["tests*"]
 
 [tool.pytest.ini_options]

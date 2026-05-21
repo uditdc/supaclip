@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from clipper.extract.backends import gemma_video as gv
-from clipper.extract.profiles import GTA_PROFILE
+from supaclip.extract.backends import gemma_video as gv
+from supaclip.extract.profiles import GTA_PROFILE
 
 
 def test_split_chunks_short_input_is_single_chunk():

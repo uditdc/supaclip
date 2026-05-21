@@ -82,28 +82,28 @@ class EDL(BaseModel):
 
 ### New modules
 
-- `clipper/stitch/effects.py` — per-cue filter builders for `freeze_first`,
+- `supaclip/stitch/effects.py` — per-cue filter builders for `freeze_first`,
   `ken_burns_in/out`, `slow_mo`. Returns a snippet that slots into the
   existing reframe → effect → label chain.
-- `clipper/stitch/transitions.py` — emits `xfade` filter pairs when adjacent
+- `supaclip/stitch/transitions.py` — emits `xfade` filter pairs when adjacent
   cues request crossfade. Switches the video graph from `concat` to a
   staged `xfade` chain in that case.
-- `clipper/stitch/annotation.py` — `drawbox` + `geq` or generated PNG
+- `supaclip/stitch/annotation.py` — `drawbox` + `geq` or generated PNG
   overlays for circles/arrows; emits ffmpeg filter strings with
   `enable='between(t,…)'`.
-- `clipper/stitch/music.py` — adds a music input, applies
+- `supaclip/stitch/music.py` — adds a music input, applies
   `sidechaincompress` against the voiceover when `duck=True`.
-- `clipper/stitch/progress.py` — parses ffmpeg `-progress pipe:1` output
+- `supaclip/stitch/progress.py` — parses ffmpeg `-progress pipe:1` output
   into `(out_time_ms, pct)` events, fed to a callback.
 
 ### Modified
 
-- `clipper/stitch/assembly.py` — incorporate the new builders; choose
+- `supaclip/stitch/assembly.py` — incorporate the new builders; choose
   `concat` vs `xfade` based on whether any cue requests crossfade.
-- `clipper/stitch/render.py` — accept a progress callback; default
+- `supaclip/stitch/render.py` — accept a progress callback; default
   callback writes a one-line progress bar via the Logger.
-- `clipper/catalog/mcp.py` — `render_edl` streams progress notifications.
-- `clipper/stitch/cli.py` — `--print-ffmpeg`, `--preview-cue N` flags.
+- `supaclip/catalog/mcp.py` — `render_edl` streams progress notifications.
+- `supaclip/stitch/cli.py` — `--print-ffmpeg`, `--preview-cue N` flags.
 
 ---
 
@@ -156,17 +156,17 @@ that). It does include the rule "do not stop or ask between steps".
 
 1. **`.claude/skills/stitch-director.md`** — write first; high
    value-to-effort, immediately unblocks every future session.
-2. **EDL schema v1.1** in `clipper/core/edl.py` + validator updates
+2. **EDL schema v1.1** in `supaclip/core/edl.py` + validator updates
    (effect params sanity, annotation in-bounds, music file existence) +
    tests.
-3. `clipper/stitch/effects.py` + unit tests.
-4. `clipper/stitch/transitions.py` + unit tests (xfade snippet correctness).
-5. `clipper/stitch/annotation.py` + unit tests.
-6. `clipper/stitch/music.py` + unit tests (graph snapshot with/without
+3. `supaclip/stitch/effects.py` + unit tests.
+4. `supaclip/stitch/transitions.py` + unit tests (xfade snippet correctness).
+5. `supaclip/stitch/annotation.py` + unit tests.
+6. `supaclip/stitch/music.py` + unit tests (graph snapshot with/without
    ducking).
-7. Refactor `clipper/stitch/assembly.py` to call the new builders; choose
+7. Refactor `supaclip/stitch/assembly.py` to call the new builders; choose
    `concat` vs `xfade` chain; integration test.
-8. `clipper/stitch/progress.py` + wire into `render.py` and `cli.py`.
+8. `supaclip/stitch/progress.py` + wire into `render.py` and `cli.py`.
 9. `stitch render --print-ffmpeg` + `--preview-cue N` flags.
 10. Update `docs/stitch.md`, `docs/claude-prompt.md`,
     `examples/edl-gta6-hair.json` (add a v1.1 variant exercising
@@ -178,13 +178,13 @@ that). It does include the rule "do not stop or ask between steps".
 
 | Need | Reuse |
 |---|---|
-| Logger | `clipper/core/log.py:Logger` |
-| Cache (music bed file resolution by catalog ref) | `clipper/core/cache.py:Cache` |
-| TTS cache | `clipper/stitch/tts/cache.py:TTSCache` |
-| ffmpeg run wrapper | `clipper/core/ffmpeg.py:run_ffmpeg` |
-| Catalog resolver | `clipper/catalog/search.py:get_clip` |
-| Filter pattern (reframe, overlay) | `clipper/stitch/reframe.py`, `overlay.py` — mirror their pure-function style |
-| Backend pattern (TTS) | `clipper/stitch/tts/` — annotations could grow into a `clipper/stitch/annotations/backends/` if we later want a PIL-based renderer |
+| Logger | `supaclip/core/log.py:Logger` |
+| Cache (music bed file resolution by catalog ref) | `supaclip/core/cache.py:Cache` |
+| TTS cache | `supaclip/stitch/tts/cache.py:TTSCache` |
+| ffmpeg run wrapper | `supaclip/core/ffmpeg.py:run_ffmpeg` |
+| Catalog resolver | `supaclip/catalog/search.py:get_clip` |
+| Filter pattern (reframe, overlay) | `supaclip/stitch/reframe.py`, `overlay.py` — mirror their pure-function style |
+| Backend pattern (TTS) | `supaclip/stitch/tts/` — annotations could grow into a `supaclip/stitch/annotations/backends/` if we later want a PIL-based renderer |
 
 ---
 

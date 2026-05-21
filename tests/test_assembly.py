@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from clipper.core.edl import (
+from supaclip.core.edl import (
     EDL,
     EDLAnnotation,
     EDLAudioCue,
@@ -12,8 +12,8 @@ from clipper.core.edl import (
     EDLVideoCue,
     EDLVoiceover,
 )
-from clipper.stitch.assembly import CueInput, RenderInputs, build_command
-from clipper.stitch.music import build_music_plan
+from supaclip.stitch.assembly import CueInput, RenderInputs, build_command
+from supaclip.stitch.music import build_music_plan
 
 
 def _two_cue_edl(duration: float = 4.0, with_vo: bool = True) -> tuple[EDL, list[CueInput]]:

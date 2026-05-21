@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from clipper.core.ffmpeg import VideoInfo
-from clipper.core.log import Logger
-from clipper.extract import pipeline as pipeline_mod
-from clipper.extract.analyze import SegmentAnalysis, SegmentEvent
-from clipper.extract.pipeline import ExtractConfig, _run_one
-from clipper.extract.profiles import GTA_PROFILE
+from supaclip.core.ffmpeg import VideoInfo
+from supaclip.core.log import Logger
+from supaclip.extract import pipeline as pipeline_mod
+from supaclip.extract.analyze import SegmentAnalysis, SegmentEvent
+from supaclip.extract.pipeline import ExtractConfig, _run_one
+from supaclip.extract.profiles import GTA_PROFILE
 
 
 class StubBackend:

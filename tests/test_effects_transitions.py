@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from clipper.core.edl import EDLAnnotation, EDLMusic, EDLVideoCue
-from clipper.stitch.annotation import build_annotation, build_annotation_chain
-from clipper.stitch.effects import plan_effect
-from clipper.stitch.music import build_music_plan, resolve_music_file
-from clipper.stitch.transitions import build_join_chain, needs_xfade_chain
+from supaclip.core.edl import EDLAnnotation, EDLMusic, EDLVideoCue
+from supaclip.stitch.annotation import build_annotation, build_annotation_chain
+from supaclip.stitch.effects import plan_effect
+from supaclip.stitch.music import build_music_plan, resolve_music_file
+from supaclip.stitch.transitions import build_join_chain, needs_xfade_chain
 
 
 # ---- effects ----

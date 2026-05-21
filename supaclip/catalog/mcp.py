@@ -19,7 +19,7 @@ from .search import (
 
 
 def _catalog_path() -> Path:
-    return resolve_catalog_path(os.environ.get("CLIPPER_CATALOG"))
+    return resolve_catalog_path(os.environ.get("SUPACLIP_CATALOG"))
 
 
 def _clip_to_dict(c: ClipRow) -> dict[str, Any]:
@@ -152,8 +152,8 @@ def _build_server():
         Pass the full EDL JSON. Returns {ok, issues:[{severity,path,message}]}.
         Run this before render_edl to catch problems early.
         """
-        from clipper.core.edl import EDL
-        from clipper.core.edl import validate_edl as _v
+        from supaclip.core.edl import EDL
+        from supaclip.core.edl import validate_edl as _v
 
         try:
             parsed = EDL.model_validate(edl)
@@ -187,7 +187,7 @@ def _build_server():
         """
         import json as _json
         import tempfile
-        from clipper.stitch.render import RenderConfig, render
+        from supaclip.stitch.render import RenderConfig, render
 
         if not edl and not edl_path:
             return {"status": "error", "message": "supply edl or edl_path"}

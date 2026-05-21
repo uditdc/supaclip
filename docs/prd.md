@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Project** | `supaclip` (Python package: `clipper`) |
+| **Project** | `supaclip` (Python package: `supaclip`) |
 | **Component** | Phase 1 — Extract CLI (command: `extract`) |
 | **Status** | Locked — ready for implementation |
 | **Audience** | This document is the implementation brief for Claude Code. It is self-contained; no prior conversation context is required. |
@@ -78,7 +78,7 @@ supaclip/
 ├── pyproject.toml
 ├── README.md
 ├── .env.example
-├── clipper/
+├── supaclip/
 │   ├── __init__.py
 │   ├── core/
 │   │   ├── manifest.py      # manifest Pydantic models + read/write
@@ -101,7 +101,7 @@ supaclip/
     └── test_core.py
 ```
 
-`clipper/core/` is shared library code that Phase 2 will also use. A `stitch/` package is intentionally absent.
+`supaclip/core/` is shared library code that Phase 2 will also use. A `stitch/` package is intentionally absent.
 
 ---
 
@@ -286,9 +286,9 @@ extract VIDEO [VIDEO ...] [options]
 
 - A `.env` file in the working directory is loaded automatically (via `python-dotenv`).
 - Environment variables (CLI flags override them):
-  - `CLIPPER_BASE_URL` / `OPENAI_BASE_URL` — analyzer endpoint
-  - `CLIPPER_API_KEY` / `OPENAI_API_KEY` — analyzer key
-  - `CLIPPER_LLM` — analyzer model id
+  - `LLM_BASE_URL` / `OPENAI_BASE_URL` — analyzer endpoint
+  - `LLM_API_KEY` / `OPENAI_API_KEY` — analyzer key
+  - `LLM_MODEL` — analyzer model id
 - Provide a `.env.example` documenting the local-Ollama default and a hosted (OpenRouter) alternative.
 
 ---
@@ -336,7 +336,7 @@ As in Section 6. Key responsibilities:
 - **System:** `ffmpeg` and `ffprobe` (also cover audio-energy analysis and keyframe extraction — no extra system dependency).
 - **Python (>= 3.10):** `pydantic`, `openai`, `scenedetect`, `python-dotenv`.
 - **Dev:** `pytest`.
-- Package with `pyproject.toml`; expose a console script `extract = clipper.extract.cli:main`.
+- Package with `pyproject.toml`; expose a console script `extract = supaclip.extract.cli:main`.
 
 ---
 

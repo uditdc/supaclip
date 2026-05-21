@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from clipper.core.ffmpeg import FFmpegError
+from supaclip.core.ffmpeg import FFmpegError
 
 
 @dataclass

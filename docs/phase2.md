@@ -30,14 +30,14 @@ script.md ──▶ Claude (via MCP)
 
 Two surfaces:
 1. **MCP tools** (Claude uses these): existing `catalog_search` + new `get_clip_preview`, `validate_edl`, `render_edl`.
-2. **CLI** (`clipper stitch …`): `render`, `validate`, `voice-preview`, `voices` (list ElevenLabs voices).
+2. **CLI** (`supaclip stitch …`): `render`, `validate`, `voice-preview`, `voices` (list ElevenLabs voices).
 
 ---
 
 ## New & modified files
 
 ### New — EDL contract (shared core)
-- `clipper/core/edl.py` — Pydantic models. Single source of truth for the JSON Claude emits.
+- `supaclip/core/edl.py` — Pydantic models. Single source of truth for the JSON Claude emits.
 
 ```python
 class EDLOutput(BaseModel):
@@ -87,7 +87,7 @@ class EDL(BaseModel):
 
 Plus `load_edl()` / `save_edl()` + `validate_edl(edl, catalog) -> list[ValidationIssue]` (checks: cues cover timeline, no gaps/overlaps in video track, referenced `clip_id`s resolve in the catalog, cue durations fit clip durations, voiceover present iff audio references it).
 
-### New — Stitch package `clipper/stitch/`
+### New — Stitch package `supaclip/stitch/`
 - `__init__.py`
 - `cli.py` — argparse subcommands:
   - `stitch render EDL [-o OUTPUT] [--no-cache] [-v] [--json]`
@@ -104,18 +104,18 @@ Plus `load_edl()` / `save_edl()` + `validate_edl(edl, catalog) -> list[Validatio
 - `tts/cache.py` — thin wrapper over `core.cache.Cache` namespacing TTS outputs by `sha1(text + voice_id + sorted(settings) + backend)`.
 
 ### Modified — ffmpeg helpers
-- `clipper/core/ffmpeg.py` — extend with:
+- `supaclip/core/ffmpeg.py` — extend with:
   - `cut_subrange(src, in_s, out_s, out_path)` — re-encode a slice (already exists as `cut_clip`; rename internal if needed but keep API stable).
   - `run_ffmpeg(args, log)` — wrap subprocess for filter-graph commands; surface last 30 lines of stderr on failure (consistent with existing pattern).
   - `concat_demux(inputs: list[Path], out_path)` — for the simple case of pre-prepared MP4 segments (used as a fallback).
   - The main render uses a single `filter_complex` pipeline, not concat-demux, to handle drawtext + audio mix in one pass.
 
 ### Modified — Top-level CLI
-- `clipper/cli.py` — add `stitch` to the subcommand dispatcher alongside `extract`, `catalog`, `mcp`.
-- `pyproject.toml` — add console script `stitch = clipper.stitch.cli:main`; no new hard deps (uses stdlib `urllib` for ElevenLabs HTTP).
+- `supaclip/cli.py` — add `stitch` to the subcommand dispatcher alongside `extract`, `catalog`, `mcp`.
+- `pyproject.toml` — add console script `stitch = supaclip.stitch.cli:main`; no new hard deps (uses stdlib `urllib` for ElevenLabs HTTP).
 
 ### Modified — MCP server
-- `clipper/catalog/mcp.py` — add three tools:
+- `supaclip/catalog/mcp.py` — add three tools:
   - `get_clip_preview(clip_id: str)` → `{description, categories, duration, score, keyframe_paths, source_file, source_in, source_out}`. Thin wrapper over existing `search.py` row resolution.
   - `validate_edl(edl: dict)` → `{ok: bool, issues: [{severity, message, path}]}`. Calls `core.edl.validate_edl()`.
   - `render_edl(edl: dict | path, output_path: str)` → `{status, output, sidecar, log_excerpt}`. Spawns the stitch render in-process, streams a summary back. Optional MCP tool — gated on `--allow-render` server flag so a default MCP install doesn't burn TTS credits unsolicited.
@@ -139,13 +139,13 @@ Plus `load_edl()` / `save_edl()` + `validate_edl(edl, catalog) -> list[Validatio
 
 | Need | Reuse |
 |---|---|
-| Logger (stage/info/success/warn/error) | `clipper/core/log.py:Logger` |
-| Content-hashed JSON cache | `clipper/core/cache.py:Cache` + `fingerprint_file` |
-| ffprobe / cut_clip | `clipper/core/ffmpeg.py:probe`, `cut_clip` |
-| Manifest models | `clipper/core/manifest.py` (Stitch reads, never writes) |
-| Catalog lookup by `clip_id` | `clipper/catalog/search.py:_row_to_clip` resolves relative→absolute paths already |
-| argparse + env fallback patterns | `clipper/extract/cli.py:_env`, error/exit-code wrapper |
-| Backend interface pattern | `clipper/extract/backends/` (mirror for `clipper/stitch/tts/`) |
+| Logger (stage/info/success/warn/error) | `supaclip/core/log.py:Logger` |
+| Content-hashed JSON cache | `supaclip/core/cache.py:Cache` + `fingerprint_file` |
+| ffprobe / cut_clip | `supaclip/core/ffmpeg.py:probe`, `cut_clip` |
+| Manifest models | `supaclip/core/manifest.py` (Stitch reads, never writes) |
+| Catalog lookup by `clip_id` | `supaclip/catalog/search.py:_row_to_clip` resolves relative→absolute paths already |
+| argparse + env fallback patterns | `supaclip/extract/cli.py:_env`, error/exit-code wrapper |
+| Backend interface pattern | `supaclip/extract/backends/` (mirror for `supaclip/stitch/tts/`) |
 
 ---
 
@@ -155,7 +155,7 @@ Plus `load_edl()` / `save_edl()` + `validate_edl(edl, catalog) -> list[Validatio
 2. `stitch/reframe.py` + `stitch/overlay.py` — pure filter-string builders, unit-tested in isolation.
 3. `stitch/tts/{base,elevenlabs,cache}.py` — TTS, mocked test, then a manual smoke against ElevenLabs.
 4. `stitch/assembly.py` + `stitch/render.py` — wire the filter graph; integration test against synthetic clips.
-5. `stitch/cli.py` + top-level `clipper/cli.py` wiring + `pyproject.toml` console script.
+5. `stitch/cli.py` + top-level `supaclip/cli.py` wiring + `pyproject.toml` console script.
 6. `catalog/mcp.py` extensions (`get_clip_preview`, `validate_edl`, `render_edl`).
 7. `docs/stitch.md` walkthrough; update README.
 8. End-to-end dry-run with the user's GTA 6 hair-physics script against existing catalog clips.
@@ -167,10 +167,10 @@ Plus `load_edl()` / `save_edl()` + `validate_edl(edl, catalog) -> list[Validatio
 Run **all** of the following before declaring done:
 
 1. `pytest` — unit + integration suites green, including the synthetic-clip render integration test.
-2. `clipper stitch validate examples/edl-gta6-hair.json` — exits 0 on a hand-authored EDL of the example script.
-3. `clipper stitch voice-preview --text "Twelve years." --voice-id <id> -o /tmp/preview.wav` — produces an audible wav; second run hits cache (no HTTP).
-4. `clipper stitch render examples/edl-gta6-hair.json -o /tmp/short.mp4` — produces an mp4 where `ffprobe` reports `1080x1920`, `60 fps`, duration within ±100 ms of EDL `output.duration`, both video + audio streams present.
-5. MCP smoke: start `clipper-mcp`, from Claude call `catalog_search` → `get_clip_preview` → `validate_edl` → `render_edl` end-to-end against the example script. Confirm the rendered file plays in VLC and that on-screen text appears at the expected timestamps.
+2. `supaclip stitch validate examples/edl-gta6-hair.json` — exits 0 on a hand-authored EDL of the example script.
+3. `supaclip stitch voice-preview --text "Twelve years." --voice-id <id> -o /tmp/preview.wav` — produces an audible wav; second run hits cache (no HTTP).
+4. `supaclip stitch render examples/edl-gta6-hair.json -o /tmp/short.mp4` — produces an mp4 where `ffprobe` reports `1080x1920`, `60 fps`, duration within ±100 ms of EDL `output.duration`, both video + audio streams present.
+5. MCP smoke: start `supaclip-mcp`, from Claude call `catalog_search` → `get_clip_preview` → `validate_edl` → `render_edl` end-to-end against the example script. Confirm the rendered file plays in VLC and that on-screen text appears at the expected timestamps.
 6. Re-run step 4 with `--no-cache`: TTS regenerates, output is byte-similar (modulo encoder nondeterminism — verify by re-probing dimensions/duration, not hash).
 7. Negative cases: EDL with a gap → `validate` reports it and `render` refuses; EDL with `clip_id` not in catalog → `validate` flags it; ElevenLabs key missing → clear error with exit code 2.
 

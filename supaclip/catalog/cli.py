@@ -15,13 +15,13 @@ from .search import parse_signal_filter
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="clipper catalog",
+        prog="supaclip catalog",
         description="Store and search clips across many extract runs.",
     )
     p.add_argument(
         "--catalog",
         default=None,
-        help="Path to the catalog DB (default: $CLIPPER_CATALOG or "
+        help="Path to the catalog DB (default: $SUPACLIP_CATALOG or "
         "~/.local/share/supaclip/catalog.db)",
     )
     sub = p.add_subparsers(dest="cmd", required=True)

@@ -4,7 +4,7 @@ import sys
 
 
 USAGE = """\
-clipper <command> [args...]
+supaclip <command> [args...]
 
 Commands:
   extract   Split a local video into clips and a manifest.json
@@ -12,7 +12,7 @@ Commands:
   stitch    Render a short-form video from a Claude-authored EDL
   mcp       Run the MCP server (exposes catalog to Claude over stdio)
 
-Run `clipper <command> --help` for command-specific help.
+Run `supaclip <command> --help` for command-specific help.
 """
 
 

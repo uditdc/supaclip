@@ -22,7 +22,7 @@ is empty or an MCP tool returns an unrecoverable error.**
 ## Pipeline (always in this order)
 
 1. **`catalog_stats`** — if `clips == 0`, stop and tell the user to run
-   `clipper catalog add <path>` first.
+   `supaclip catalog add <path>` first.
 2. **Parse the script** internally: total duration, list of `(start, end,
    intent)` b-roll cues, list of `(start, end, text, style_hint)` OST
    cues, full voiceover text (preserve `<break time="…"/>` SSML).

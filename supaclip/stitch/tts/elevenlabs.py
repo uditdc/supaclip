@@ -8,8 +8,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from clipper.core.ffmpeg import run_ffmpeg
-from clipper.stitch.tts.base import TTSBackend, Voice, normalize_settings
+from supaclip.core.ffmpeg import run_ffmpeg
+from supaclip.stitch.tts.base import TTSBackend, Voice, normalize_settings
 
 API_ROOT = "https://api.elevenlabs.io/v1"
 DEFAULT_MODEL = "eleven_multilingual_v2"

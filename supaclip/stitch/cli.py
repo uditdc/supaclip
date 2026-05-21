@@ -97,8 +97,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _cmd_render(args) -> int:
-    from clipper.core.log import Logger
-    from clipper.stitch.render import RenderConfig, RenderError, render
+    from supaclip.core.log import Logger
+    from supaclip.stitch.render import RenderConfig, RenderError, render
 
     log = Logger(verbose=args.verbose)
     edl_path = Path(args.edl)
@@ -148,10 +148,10 @@ def _cmd_render(args) -> int:
 
 
 def _cmd_validate(args) -> int:
-    from clipper.catalog import connect, resolve_catalog_path
-    from clipper.catalog.search import get_clip
-    from clipper.core.edl import load_edl, validate_edl
-    from clipper.core.log import Logger
+    from supaclip.catalog import connect, resolve_catalog_path
+    from supaclip.catalog.search import get_clip
+    from supaclip.core.edl import load_edl, validate_edl
+    from supaclip.core.log import Logger
 
     log = Logger()
     try:
@@ -179,9 +179,9 @@ def _cmd_validate(args) -> int:
 
 
 def _cmd_voice_preview(args) -> int:
-    from clipper.core.log import Logger
-    from clipper.stitch.tts import get_backend
-    from clipper.stitch.tts.cache import TTSCache
+    from supaclip.core.log import Logger
+    from supaclip.stitch.tts import get_backend
+    from supaclip.stitch.tts.cache import TTSCache
 
     log = Logger()
     api_key = args.api_key or _env("ELEVENLABS_API_KEY")
@@ -211,8 +211,8 @@ def _cmd_voice_preview(args) -> int:
 
 
 def _cmd_voices(args) -> int:
-    from clipper.core.log import Logger
-    from clipper.stitch.tts import get_backend
+    from supaclip.core.log import Logger
+    from supaclip.stitch.tts import get_backend
 
     log = Logger()
     api_key = args.api_key or _env("ELEVENLABS_API_KEY")

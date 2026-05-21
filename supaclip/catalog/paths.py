@@ -13,7 +13,7 @@ def default_catalog_path() -> Path:
 def resolve_catalog_path(flag_value: str | None = None) -> Path:
     if flag_value:
         return Path(flag_value).expanduser().resolve()
-    env = os.environ.get("CLIPPER_CATALOG")
+    env = os.environ.get("SUPACLIP_CATALOG")
     if env:
         return Path(env).expanduser().resolve()
     return default_catalog_path()
