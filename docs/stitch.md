@@ -96,8 +96,30 @@ Top-level optional fields:
   "file": "/path/to/bed.mp3",          // or "catalog:<clip_id>"
   "level_db": -22.0,
   "duck": true                          // sidechain-compress under voiceover
+},
+"captions": {
+  "style": "clean_white",               // clean_white | boxed_dark | karaoke_yellow
+  "position": "lower_third",            // top | middle | lower_third | bottom
+  "max_words": 4,
+  "max_chars": 28,
+  "min_chunk_duration": 0.4,
+  "font_size": null                     // optional override (pixels)
 }
 ```
+
+### Speech-synced captions vs OST
+
+`ost` is **hand-authored** stylized emphasis text — you decide when and where
+each card appears. `captions` is **auto-generated** from the voiceover using
+character-level timestamps from the TTS backend; phrases appear in sync with
+the spoken audio. Use OST for "moments" (hooks, reveals); use captions for
+accessibility / sound-off viewing.
+
+Captions require `voiceover` to be set (timing is derived from it). When
+enabled, the render fetches alignment from `/v1/text-to-speech/{id}/with-timestamps`
+(cached alongside the wav as a `.alignment.json` sidecar). The script is
+chunked into short phrases on punctuation and word/char limits, then each
+chunk is rendered as a PNG and overlaid on top of OST.
 
 Annotation shapes (MVP rendering via ffmpeg `drawbox`):
 - `box` — proper rectangle outline.

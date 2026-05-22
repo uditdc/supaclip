@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -9,7 +10,12 @@ import urllib.request
 from pathlib import Path
 
 from supaclip.core.ffmpeg import run_ffmpeg
-from supaclip.stitch.tts.base import TTSBackend, Voice, normalize_settings
+from supaclip.stitch.tts.base import (
+    Alignment,
+    TTSBackend,
+    Voice,
+    normalize_settings,
+)
 
 API_ROOT = "https://api.elevenlabs.io/v1"
 DEFAULT_MODEL = "eleven_multilingual_v2"
@@ -90,6 +96,70 @@ class ElevenLabsBackend(TTSBackend):
             except OSError:
                 pass
         return out
+
+    def synthesize_with_alignment(
+        self,
+        text: str,
+        voice_id: str,
+        settings: dict[str, float],
+        out_path: str | Path,
+    ) -> tuple[Path, Alignment]:
+        key = self._require_key()
+        body = {
+            "text": text,
+            "model_id": self.model_id,
+            "voice_settings": _to_voice_settings(settings),
+        }
+        req = urllib.request.Request(
+            f"{self.api_root}/text-to-speech/{voice_id}/with-timestamps",
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+            headers={
+                "xi-api-key": key,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with self._opener.open(req) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", errors="replace")[:500]
+            raise ElevenLabsError(f"ElevenLabs HTTP {e.code}: {detail}") from e
+        except urllib.error.URLError as e:
+            raise ElevenLabsError(f"ElevenLabs request failed: {e.reason}") from e
+
+        audio_b64 = payload.get("audio_base64")
+        if not audio_b64:
+            raise ElevenLabsError("ElevenLabs response missing audio_base64")
+        mp3_bytes = base64.b64decode(audio_b64)
+
+        align_raw = payload.get("normalized_alignment") or payload.get("alignment")
+        if not align_raw or "characters" not in align_raw:
+            raise ElevenLabsError("ElevenLabs response missing alignment data")
+        alignment = Alignment(
+            characters=list(align_raw["characters"]),
+            start_times=[float(t) for t in align_raw["character_start_times_seconds"]],
+            end_times=[float(t) for t in align_raw["character_end_times_seconds"]],
+        )
+
+        out = Path(out_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            tmp.write(mp3_bytes)
+            tmp_path = tmp.name
+        try:
+            run_ffmpeg([
+                "-i", tmp_path,
+                "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le",
+                str(out),
+            ])
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        return out, alignment
 
     def list_voices(self) -> list[Voice]:
         key = self._require_key()

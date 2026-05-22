@@ -120,7 +120,7 @@ def test_render_end_to_end_with_catalog(tmp_path: Path):
         use_cache=True,
     )
 
-    with patch("supaclip.stitch.render._synthesize", return_value=vo_wav):
+    with patch("supaclip.stitch.render._synthesize", return_value=(vo_wav, None)):
         result = render(cfg)
 
     assert Path(result.output).exists()
@@ -213,7 +213,7 @@ def test_render_v11_features_end_to_end(tmp_path: Path):
         cache_dir=str(tmp_path / "cache"),
         use_cache=True,
     )
-    with patch("supaclip.stitch.render._synthesize", return_value=vo_wav):
+    with patch("supaclip.stitch.render._synthesize", return_value=(vo_wav, None)):
         result = render(cfg)
 
     info = probe(result.output)

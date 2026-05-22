@@ -34,6 +34,9 @@ class TTSCache:
     def path_for(self, key: str) -> Path:
         return self.root / f"{key}.wav"
 
+    def path_for_alignment(self, key: str) -> Path:
+        return self.root / f"{key}.alignment.json"
+
     def get(self, key: str) -> Path | None:
         if not self.enabled:
             return None
@@ -55,3 +58,27 @@ class TTSCache:
                 return dst
             except OSError:
                 return None
+
+    def get_alignment(self, key: str) -> dict | None:
+        if not self.enabled:
+            return None
+        p = self.path_for_alignment(key)
+        if not p.exists():
+            return None
+        try:
+            with p.open("r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def put_alignment(self, key: str, data: dict) -> Path | None:
+        if not self.enabled:
+            return None
+        dst = self.path_for_alignment(key)
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            with dst.open("w", encoding="utf-8") as fh:
+                json.dump(data, fh)
+            return dst
+        except OSError:
+            return None

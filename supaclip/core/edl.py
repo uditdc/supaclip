@@ -13,6 +13,8 @@ ReframeMode = Literal["crop_center", "crop_left", "crop_right", "letterbox"]
 AudioKind = Literal["voiceover", "clip_audio", "silence"]
 OSTStyle = Literal["dark", "light", "yellow_punch", "red_alert", "pink_reveal"]
 OSTPosition = Literal["top", "middle", "bottom"]
+CaptionStyleName = Literal["clean_white", "boxed_dark", "karaoke_yellow"]
+CaptionPosition = Literal["top", "middle", "bottom", "lower_third"]
 TTSBackendName = Literal["elevenlabs"]
 EffectKind = Literal["none", "freeze_first", "ken_burns_in", "ken_burns_out", "slow_mo"]
 TransitionKind = Literal["cut", "crossfade"]
@@ -79,6 +81,22 @@ class EDLAudioCue(BaseModel):
     duck: bool = False
 
 
+class EDLCaptions(BaseModel):
+    """Speech-synced captions derived automatically from the voiceover.
+
+    Distinct from `ost`: OST is hand-authored emphasis text, captions are
+    auto-timed phrases that appear in sync with the spoken voiceover using
+    character-level timestamps from the TTS backend.
+    """
+    model_config = ConfigDict(extra="forbid")
+    style: CaptionStyleName = "clean_white"
+    position: CaptionPosition = "lower_third"
+    max_words: int = 4
+    max_chars: int = 28
+    min_chunk_duration: float = 0.4
+    font_size: int | None = None
+
+
 class EDLOSTCue(BaseModel):
     model_config = ConfigDict(extra="forbid")
     start: float
@@ -97,6 +115,7 @@ class EDL(BaseModel):
     video: list[EDLVideoCue] = Field(default_factory=list)
     audio: list[EDLAudioCue] = Field(default_factory=list)
     ost: list[EDLOSTCue] = Field(default_factory=list)
+    captions: EDLCaptions | None = None
     annotations: list[EDLAnnotation] = Field(default_factory=list)
     music: EDLMusic | None = None
 
@@ -259,6 +278,29 @@ def validate_edl(edl: EDL, resolver: ClipResolver | None = None) -> list[Validat
             "warning", "voiceover",
             "voiceover defined but no audio cue uses it",
         ))
+
+    if edl.captions is not None:
+        if edl.voiceover is None:
+            issues.append(ValidationIssue(
+                "error", "captions",
+                "captions require a voiceover to derive timing from",
+            ))
+        if edl.captions.max_words <= 0:
+            issues.append(ValidationIssue(
+                "error", "captions.max_words", "must be > 0",
+            ))
+        if edl.captions.max_chars <= 0:
+            issues.append(ValidationIssue(
+                "error", "captions.max_chars", "must be > 0",
+            ))
+        if edl.captions.min_chunk_duration < 0:
+            issues.append(ValidationIssue(
+                "error", "captions.min_chunk_duration", "must be >= 0",
+            ))
+        if edl.captions.font_size is not None and edl.captions.font_size <= 0:
+            issues.append(ValidationIssue(
+                "error", "captions.font_size", "must be > 0",
+            ))
 
     if edl.music is not None and edl.music.duck and edl.voiceover is None:
         issues.append(ValidationIssue(

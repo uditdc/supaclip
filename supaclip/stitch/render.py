@@ -13,9 +13,11 @@ from supaclip.core.ffmpeg import ensure_ffmpeg, probe, run_ffmpeg
 from supaclip.stitch.progress import ProgressEvent, run_ffmpeg_with_progress
 from supaclip.core.log import Logger
 from supaclip.stitch.assembly import CueInput, RenderInputs, build_command
+from supaclip.stitch.captions import chunk_alignment, render_caption_pngs
 from supaclip.stitch.music import build_music_plan, resolve_music_file
 from supaclip.stitch.overlay import render_ost_pngs
 from supaclip.stitch.tts import get_backend
+from supaclip.stitch.tts.base import Alignment
 from supaclip.stitch.tts.cache import TTSCache
 
 
@@ -87,9 +89,12 @@ def render(
     cue_inputs = _resolve_cue_inputs(conn, edl, log)
 
     voiceover_wav: Path | None = None
+    alignment: Alignment | None = None
     if edl.voiceover is not None:
         log.stage("synthesize voiceover")
-        voiceover_wav = _synthesize(edl, config, log)
+        voiceover_wav, alignment = _synthesize(
+            edl, config, log, want_alignment=edl.captions is not None,
+        )
 
     music_path: str | None = None
     music_plan = None
@@ -117,6 +122,32 @@ def render(
         )
         log.info(f"rendered {len(ost_renders)} OST png(s) -> {ost_cache}")
 
+    caption_renders = []
+    if edl.captions is not None and alignment is not None:
+        log.stage("render speech captions")
+        voiceover_cues = [c for c in edl.audio if c.kind == "voiceover"]
+        voiceover_offset = voiceover_cues[0].start if voiceover_cues else 0.0
+        chunks = chunk_alignment(
+            alignment,
+            max_words=edl.captions.max_words,
+            max_chars=edl.captions.max_chars,
+            min_chunk_duration=edl.captions.min_chunk_duration,
+        )
+        caption_cache = Path(config.cache_dir).expanduser() / "captions"
+        caption_renders = render_caption_pngs(
+            chunks=chunks,
+            config=edl.captions,
+            out_w=edl.output.width,
+            out_h=edl.output.height,
+            cache_dir=caption_cache,
+            voiceover_offset=voiceover_offset,
+            fontfile=config.fontfile,
+        )
+        log.info(
+            f"rendered {len(caption_renders)} caption png(s) "
+            f"from {len(chunks)} phrase(s) -> {caption_cache}"
+        )
+
     log.stage("render")
     inputs = RenderInputs(
         edl=edl, cues=cue_inputs,
@@ -125,6 +156,7 @@ def render(
         music_path=music_path,
         music_plan=music_plan,
         ost_renders=ost_renders,
+        caption_renders=caption_renders,
     )
     out_path = Path(config.output_path).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -221,6 +253,7 @@ def _trim_to_single_cue(edl: EDL, idx: int) -> EDL:
         "video": new_video,
         "audio": audio,
         "ost": ost,
+        "captions": None,
         "annotations": annotations,
     })
 
@@ -245,23 +278,45 @@ def _default_progress(log: Logger):
     return cb
 
 
-def _synthesize(edl: EDL, config: RenderConfig, log: Logger) -> Path:
+def _synthesize(
+    edl: EDL,
+    config: RenderConfig,
+    log: Logger,
+    want_alignment: bool = False,
+) -> tuple[Path, Alignment | None]:
     assert edl.voiceover is not None
     vo = edl.voiceover
     cache = TTSCache(config.cache_dir, enabled=config.use_cache)
     key = TTSCache.key(vo.backend, vo.voice_id, vo.settings, vo.script)
+
     cached = cache.get(key)
-    if cached is not None:
+    cached_align: Alignment | None = None
+    if cached is not None and want_alignment:
+        raw = cache.get_alignment(key)
+        if raw is not None:
+            cached_align = Alignment.from_dict(raw)
+
+    if cached is not None and (not want_alignment or cached_align is not None):
         log.success(f"cache hit: {cached}")
-        return cached
+        return cached, cached_align
 
     backend = get_backend(vo.backend, api_key=config.api_key)
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp_path = Path(tmp.name)
-    backend.synthesize(vo.script, vo.voice_id, vo.settings, tmp_path)
+
+    alignment: Alignment | None = None
+    if want_alignment:
+        _, alignment = backend.synthesize_with_alignment(
+            vo.script, vo.voice_id, vo.settings, tmp_path,
+        )
+    else:
+        backend.synthesize(vo.script, vo.voice_id, vo.settings, tmp_path)
+
     stored = cache.put(key, tmp_path)
     if stored is None:
         log.warn("cache disabled or unwritable; using temp wav")
-        return tmp_path
+        return tmp_path, alignment
+    if alignment is not None:
+        cache.put_alignment(key, alignment.to_dict())
     log.success(f"voiceover wav: {stored}")
-    return stored
+    return stored, alignment

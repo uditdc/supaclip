@@ -12,6 +12,33 @@ class Voice:
     description: str | None = None
 
 
+@dataclass(frozen=True)
+class Alignment:
+    """Per-character timing for a synthesized utterance.
+
+    `characters[i]` is spoken between `start_times[i]` and `end_times[i]`
+    (seconds from audio start). Spaces and punctuation are included.
+    """
+    characters: list[str]
+    start_times: list[float]
+    end_times: list[float]
+
+    def to_dict(self) -> dict[str, list]:
+        return {
+            "characters": list(self.characters),
+            "start_times": list(self.start_times),
+            "end_times": list(self.end_times),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Alignment":
+        return cls(
+            characters=list(data["characters"]),
+            start_times=[float(t) for t in data["start_times"]],
+            end_times=[float(t) for t in data["end_times"]],
+        )
+
+
 class TTSBackend(Protocol):
     name: str
 
@@ -23,6 +50,16 @@ class TTSBackend(Protocol):
         out_path: str | Path,
     ) -> Path:
         """Synthesize `text` to a wav file at `out_path`. Returns the written path."""
+        ...
+
+    def synthesize_with_alignment(
+        self,
+        text: str,
+        voice_id: str,
+        settings: dict[str, float],
+        out_path: str | Path,
+    ) -> tuple[Path, Alignment]:
+        """Synthesize and also return per-character timing data."""
         ...
 
     def list_voices(self) -> list[Voice]:

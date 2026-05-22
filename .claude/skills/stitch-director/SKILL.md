@@ -80,6 +80,7 @@ is empty or an MCP tool returns an unrecoverable error.**
       "x": 540, "y": 700, "radius": 180,
       "color": "#ff3b30", "stroke_width": 8 }
   ],
+  "captions": null,
   "music": null
 }
 ```
@@ -117,6 +118,61 @@ If a style is unclear, default to `dark`.
 | "at the top", "above" | `top` |
 | "center", "middle of frame" | `middle` |
 | (default), "bottom", "CTA", "👇", "lower third" | `bottom` |
+
+## Speech-synced captions (distinct from OST)
+
+`captions` and `ost` are **different features**:
+
+- **`ost`** — hand-authored emphasis cards. You decide the text, time, and
+  style of each one. Used for hooks, reveals, headlines.
+- **`captions`** — auto-generated from the voiceover using ElevenLabs
+  character-level timestamps. Phrases appear in sync with the spoken
+  audio. Used for accessibility / sound-off viewing.
+
+**Add captions whenever the user mentions any of:** "captions", "subtitles",
+"closed captions", "CC", "burned-in subs", "TikTok-style subs", "word
+captions", "speech captions", "sound off", "accessibility text".
+
+Captions require a `voiceover` block (timing is derived from it). The
+script you put in `voiceover.script` is what gets captioned — they always
+match. You do NOT enumerate phrases; just set the config block:
+
+```json
+"captions": {
+  "style": "clean_white",
+  "position": "lower_third",
+  "max_words": 4,
+  "max_chars": 28,
+  "min_chunk_duration": 0.4
+}
+```
+
+Style mapping:
+
+| User wording | `style` |
+|---|---|
+| (default), "clean", "subtitles", "white text", "minimal" | `clean_white` |
+| "boxed", "with background", "dark background", "readable on busy footage" | `boxed_dark` |
+| "TikTok yellow", "karaoke", "pop captions", "punchy captions" | `karaoke_yellow` |
+
+Position mapping (same vocabulary as OST):
+
+| User wording | `position` |
+|---|---|
+| "at the top" | `top` |
+| "center", "middle" | `middle` |
+| (default), "lower third", "above the bottom" | `lower_third` |
+| "very bottom", "pinned to bottom" | `bottom` |
+
+Tuning knobs (only adjust if the user asks):
+- `max_words` (default 4) — words per caption flash. 2–3 for snappier TikTok feel.
+- `max_chars` (default 28) — fallback char limit for long words.
+- `min_chunk_duration` (default 0.4 s) — minimum on-screen time for very short chunks.
+- `font_size` — override pixel size; otherwise the style preset's size is used.
+
+**Avoid clashes:** captions sit at `lower_third` by default; if the user
+wants OST cards in the same area, move OST to `top` or `middle` (or move
+captions to `bottom`). Captions render on top of OST.
 
 ## Effect mapping (2.5)
 
@@ -161,6 +217,9 @@ mentioned.
   the previous `end`.
 - **`video track ends at X but output.duration is Y`** → extend the
   final cue to land exactly on `output.duration`.
+- **`captions: captions require a voiceover to derive timing from`** →
+  the user asked for captions but you omitted `voiceover`. Either drop
+  `captions` or add a `voiceover` block.
 
 ## MCP tool quick reference
 

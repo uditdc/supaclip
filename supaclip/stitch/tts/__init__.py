@@ -1,7 +1,7 @@
-from supaclip.stitch.tts.base import TTSBackend, Voice
+from supaclip.stitch.tts.base import Alignment, TTSBackend, Voice
 from supaclip.stitch.tts.cache import TTSCache
 
-__all__ = ["TTSBackend", "Voice", "TTSCache", "get_backend"]
+__all__ = ["Alignment", "TTSBackend", "Voice", "TTSCache", "get_backend"]
 
 
 def get_backend(name: str, *, api_key: str | None = None) -> TTSBackend:
