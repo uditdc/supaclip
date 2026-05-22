@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import mimetypes
 import os
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 from ..analyze import SegmentAnalysis, SegmentEvent
-from ..profiles import GameProfile
+from ..profiles import GameProfile, VideoContext
 from ._shared import (
     _coerce,
+    _context_block,
     _parse_json,
     _prune_overlaps,
     _signals_block,
@@ -53,6 +56,7 @@ class GemmaVideoBackend:
         start: float,
         end: float,
         profile: GameProfile,
+        context: VideoContext | None = None,
     ) -> SegmentAnalysis:
         total_duration = max(0.0, end - start)
         if total_duration <= 0:
@@ -70,7 +74,8 @@ class GemmaVideoBackend:
             )
 
             raw, api_err = self._call_with_retries(
-                client, mp4_bytes, profile, chunk_duration, chunk_start, chunk_end,
+                client, mp4_bytes, profile, chunk_duration,
+                chunk_start, chunk_end, context,
             )
             if api_err is not None:
                 _log_chunk_error(chunk_start, chunk_end, self.model, api_err)
@@ -84,7 +89,8 @@ class GemmaVideoBackend:
             parsed = _parse_json(raw)
             if parsed is None:
                 raw2, api_err2 = self._call_with_retries(
-                    client, mp4_bytes, profile, chunk_duration, chunk_start, chunk_end,
+                    client, mp4_bytes, profile, chunk_duration,
+                    chunk_start, chunk_end, context,
                 )
                 if api_err2 is None:
                     parsed = _parse_json(raw2)
@@ -117,15 +123,25 @@ class GemmaVideoBackend:
             )]
         return SegmentAnalysis(events=merged)
 
-    def _call(self, client, mp4_bytes: bytes, profile: GameProfile, duration: float) -> str:
+    def _call(
+        self,
+        client,
+        mp4_bytes: bytes,
+        profile: GameProfile,
+        duration: float,
+        context: VideoContext | None,
+    ) -> str:
         from google.genai import types
 
-        prompt = _build_prompt(profile, duration)
+        prompt = _build_prompt(profile, duration, context)
         video_part = _video_part(client, mp4_bytes)
+        char_parts = _character_parts(context)
         try:
+            contents: list[Any] = list(char_parts)
+            contents.extend([video_part, prompt])
             resp = client.models.generate_content(
                 model=self.model,
-                contents=[video_part, prompt],
+                contents=contents,
                 config=types.GenerateContentConfig(
                     temperature=0.2,
                     response_mime_type="application/json",
@@ -143,6 +159,7 @@ class GemmaVideoBackend:
         duration: float,
         chunk_start: float,
         chunk_end: float,
+        context: VideoContext | None,
     ) -> tuple[str, str | None]:
         """Call the model with retry on transient failures.
 
@@ -154,7 +171,7 @@ class GemmaVideoBackend:
         last_err: str | None = None
         for attempt in range(1, MAX_API_ATTEMPTS + 1):
             try:
-                return self._call(client, mp4_bytes, profile, duration), None
+                return self._call(client, mp4_bytes, profile, duration, context), None
             except Exception as e:  # noqa: BLE001
                 desc = _describe_error(e)
                 retryable = _is_retryable(e)
@@ -215,6 +232,36 @@ def _encode_chunk(
             Path(out_path).unlink()
         except OSError:
             pass
+
+
+def _character_parts(context: VideoContext | None) -> list[Any]:
+    """Build genai Part objects for each character reference image.
+
+    Yielded order matches the textual reference list in the prompt: a label
+    'Reference image N: <name>' precedes each image so the model can bind the
+    visual to the name."""
+    if context is None or not context.characters:
+        return []
+    from google.genai import types
+
+    parts: list[Any] = []
+    for i, ch in enumerate(context.characters, 1):
+        for j, img in enumerate(ch.images, 1):
+            path = Path(img)
+            try:
+                data = path.read_bytes()
+            except OSError:
+                continue
+            mime, _ = mimetypes.guess_type(path.name)
+            if not mime or not mime.startswith("image/"):
+                mime = "image/jpeg"
+            label = (
+                f"Reference image {i}.{j} of {ch.name}"
+                if len(ch.images) > 1 else f"Reference image {i}: {ch.name}"
+            )
+            parts.append(label)
+            parts.append(types.Part.from_bytes(data=data, mime_type=mime))
+    return parts
 
 
 def _video_part(client, mp4_bytes: bytes):
@@ -330,19 +377,35 @@ def _normalize_model(model: str) -> str:
     return m or "gemma-4-31b-it"
 
 
-def _build_prompt(profile: GameProfile, duration: float) -> str:
+def _build_prompt(
+    profile: GameProfile,
+    duration: float,
+    context: VideoContext | None = None,
+) -> str:
+    if profile.prompt_template_video:
+        return profile.prompt_template_video.format(
+            duration=duration,
+            subject=profile.subject,
+            hints=profile.prompt_hints,
+            taxonomy=_taxonomy_str(profile),
+            signals=_signals_block(profile, indent="      "),
+            boundary_rules=profile.effective_boundary_rules(),
+            example=profile.example_json,
+            context=_context_block(context),
+        )
     sig_lines = _signals_block(profile, indent="      ")
     tax = _taxonomy_str(profile)
+    ctx = _context_block(context)
+    example = (profile.example_json.strip() + "\n\n") if profile.example_json.strip() else ""
     return (
-        f"You are watching a {duration:.1f}-second clip of {profile.name} gameplay.\n"
+        f"{ctx}"
+        f"You are watching a {duration:.1f}-second clip of {profile.subject}.\n"
         f"{profile.prompt_hints}\n\n"
         f"Allowed category tags (subset only): {tax}\n\n"
         f"TASK: identify every distinct situation. Each event is a contiguous\n"
         f"[start, end] time window in seconds from the BEGINNING of this clip\n"
-        f"(0.0 to {duration:.1f}). Windows MUST NOT overlap. A new situation\n"
-        f"begins when ANY of these change: on-foot vs in-vehicle state, vehicle\n"
-        f"being driven, wanted level, activity (walking, driving, shooting,\n"
-        f"crashing), on-screen mission/event text, or location/environment.\n\n"
+        f"(0.0 to {duration:.1f}). Windows MUST NOT overlap.\n"
+        f"{profile.effective_boundary_rules()}\n\n"
         f"BOUNDARY PRECISION (this is the most important part — get the times right):\n"
         f"- An event's `start` MUST equal the timestamp of the first moment the\n"
         f"  new situation is visible. NOT a second earlier, NOT a second later.\n"
@@ -371,6 +434,7 @@ def _build_prompt(profile: GameProfile, duration: float) -> str:
         f"DO NOT INVENT AUDIO. The video stream is muted — you have NO sound\n"
         f"input. Do not guess sirens, engines, gunfire, music, or dialogue. The\n"
         f"schema below does not include an audio field.\n\n"
+        f"{example}"
         f"REQUIRED JSON SHAPE (return JSON only, no prose, no code fences):\n"
         f"{{\n"
         f'  "events": [\n'

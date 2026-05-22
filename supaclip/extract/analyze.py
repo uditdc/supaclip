@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from .profiles import GameProfile
+from .profiles import GameProfile, VideoContext
 
 
-PROMPT_VERSION = "v6"
+PROMPT_VERSION = "v7"
 
 
 @dataclass
@@ -34,6 +34,7 @@ class AnalyzerBackend(Protocol):
         start: float,
         end: float,
         profile: GameProfile,
+        context: VideoContext | None = None,
     ) -> SegmentAnalysis: ...
 
 

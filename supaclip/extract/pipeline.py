@@ -27,10 +27,11 @@ from .aggregate import (
     aggregate_events,
 )
 from .analyze import PROMPT_VERSION, AnalyzerBackend, blend_score, build_backend
+from .backends._shared import _context_fingerprint
 from .audio import audio_factor_for_range, detect_peaks, peak_loudness_db
 from .chunking import chunk_segment
 from .dedupe import merge_overlapping
-from .profiles import GameProfile, load_profile
+from .profiles import GameProfile, VideoContext, load_profile
 from .segment import (
     auto_segments_from_peaks,
     clamp_ranges,
@@ -64,6 +65,7 @@ class ExtractConfig:
     keep_temp: bool
     verbose: bool
     no_chunk: bool = False
+    context: VideoContext | None = None
 
 
 def run(cfg: ExtractConfig, log: Logger) -> list[Manifest]:
@@ -135,6 +137,7 @@ def _run_one(
         log.success(f"{before} → {len(ranges)} after temporal merge (IoU ≥ {cfg.dedup_iou})")
 
     log.stage(f"Analyze ({cfg.analyzer}/{cfg.llm})")
+    ctx_fp = _context_fingerprint(cfg.context)
     flat_events: list[dict] = []
     for i, (start, end) in enumerate(ranges, 1):
         chunks = [(start, end)] if cfg.no_chunk else chunk_segment(start, end, samples)
@@ -148,7 +151,7 @@ def _run_one(
         for c_idx, (cs, ce) in enumerate(chunks, 1):
             chunk_key = (
                 fingerprint, round(cs, 3), round(ce, 3),
-                cfg.analyzer, cfg.llm, profile.name, PROMPT_VERSION,
+                cfg.analyzer, cfg.llm, profile.name, PROMPT_VERSION, ctx_fp,
             )
             cached_chunk = cache.get("analysis", chunk_key)
             if cached_chunk is not None:
@@ -159,7 +162,9 @@ def _run_one(
             else:
                 if chunked:
                     log.detail(f"  chunk {c_idx}/{len(chunks)} analyzing {cs:.1f}-{ce:.1f}s")
-                analysis = backend.analyze_segment(video_path, cs, ce, profile)
+                analysis = backend.analyze_segment(
+                    video_path, cs, ce, profile, context=cfg.context,
+                )
                 payload = [
                     {
                         "start": ev.start,
@@ -190,7 +195,7 @@ def _run_one(
         )
         agg_key = (
             fingerprint, cfg.analyzer, cfg.llm, profile.name, AGG_PROMPT_VERSION,
-            len(flat_events), agg_signature,
+            len(flat_events), agg_signature, ctx_fp,
         )
         cached_agg = cache.get("aggregate", agg_key)
         if cached_agg is not None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import mimetypes
 import shutil
 import subprocess
 import tempfile
@@ -9,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from ..analyze import SegmentAnalysis, SegmentEvent
-from ..profiles import GameProfile
-from ._shared import _coerce, _parse_json, _signals_block, _taxonomy_str
+from ..profiles import GameProfile, VideoContext
+from ._shared import _coerce, _context_block, _parse_json, _signals_block, _taxonomy_str
 
 
 FRAMES_FLOOR = 6
@@ -41,6 +42,7 @@ class PreparedRequest:
     ffmpeg_command: list[str] = field(default_factory=list)
     source_path: str = ""
     workdir: Path | None = None
+    context: VideoContext | None = None
 
     def cleanup(self) -> None:
         if self.workdir and self.workdir.exists():
@@ -66,6 +68,7 @@ class GemmaBackend:
         end: float,
         profile: GameProfile,
         workdir: Path | None = None,
+        context: VideoContext | None = None,
     ) -> PreparedRequest:
         duration = max(0.0, end - start)
         owns_workdir = workdir is None
@@ -76,7 +79,7 @@ class GemmaBackend:
         ffmpeg_cmd, frames = _extract_frames(
             video_path, start, duration, workdir, count,
         )
-        prompt = _build_prompt(profile, duration, len(frames))
+        prompt = _build_prompt(profile, duration, len(frames), context)
 
         return PreparedRequest(
             backend=self.name,
@@ -95,6 +98,7 @@ class GemmaBackend:
             ffmpeg_command=ffmpeg_cmd,
             source_path=str(video_path),
             workdir=workdir if owns_workdir else None,
+            context=context,
         )
 
     def send(self, prepared: PreparedRequest) -> str:
@@ -102,6 +106,8 @@ class GemmaBackend:
             return ""
 
         content: list[dict[str, Any]] = [{"type": "text", "text": prepared.prompt}]
+        for part in _character_content_parts(prepared.context):
+            content.append(part)
         for f in prepared.frames:
             content.append({"type": "text", "text": f"t={f.t_rel:.1f}s"})
             data = f.main_jpeg if f.main_jpeg is not None else f.main_path.read_bytes()
@@ -128,8 +134,9 @@ class GemmaBackend:
         start: float,
         end: float,
         profile: GameProfile,
+        context: VideoContext | None = None,
     ) -> SegmentAnalysis:
-        prepared = self.prepare(video_path, start, end, profile)
+        prepared = self.prepare(video_path, start, end, profile, context=context)
         try:
             raw = self.send(prepared)
             parsed = _parse_json(raw)
@@ -147,6 +154,34 @@ class GemmaBackend:
             return _coerce(parsed, profile, prepared.duration)
         finally:
             prepared.cleanup()
+
+
+def _character_content_parts(context: VideoContext | None) -> list[dict[str, Any]]:
+    """OpenAI chat content parts: alternating text label + image_url for each character."""
+    if context is None or not context.characters:
+        return []
+    parts: list[dict[str, Any]] = []
+    for i, ch in enumerate(context.characters, 1):
+        for j, img in enumerate(ch.images, 1):
+            path = Path(img)
+            try:
+                data = path.read_bytes()
+            except OSError:
+                continue
+            mime, _ = mimetypes.guess_type(path.name)
+            if not mime or not mime.startswith("image/"):
+                mime = "image/jpeg"
+            b64 = base64.b64encode(data).decode("ascii")
+            label = (
+                f"Reference image {i}.{j} of {ch.name}"
+                if len(ch.images) > 1 else f"Reference image {i}: {ch.name}"
+            )
+            parts.append({"type": "text", "text": label})
+            parts.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64}"},
+            })
+    return parts
 
 
 def _frame_count_for(duration: float) -> int:
@@ -201,23 +236,42 @@ def _extract_frames(
     return cmd, frames
 
 
-def _build_prompt(profile: GameProfile, duration: float, frame_count: int) -> str:
+def _build_prompt(
+    profile: GameProfile,
+    duration: float,
+    frame_count: int,
+    context: VideoContext | None = None,
+) -> str:
+    if profile.prompt_template_frames:
+        return profile.prompt_template_frames.format(
+            duration=duration,
+            frame_count=frame_count,
+            subject=profile.subject,
+            hints=profile.prompt_hints,
+            taxonomy=_taxonomy_str(profile),
+            signals=_signals_block(profile, indent="      "),
+            boundary_rules=profile.effective_boundary_rules(),
+            example=profile.example_json,
+            context=_context_block(context),
+        )
     sig_lines = _signals_block(profile, indent="      ")
     tax = _taxonomy_str(profile)
+    ctx = _context_block(context)
+    example = (profile.example_json.strip() + "\n\n") if profile.example_json.strip() else ""
     return (
-        f"Analyze a {duration:.1f}-second video segment sampled as {frame_count} frames "
-        f"in temporal order. Each image is preceded by a text token of the form "
-        f"`t=12.5s` giving its segment-relative timestamp; the same value is also "
-        f"burned into the top-left corner of the image as a backup.\n"
+        f"{ctx}"
+        f"Analyze a {duration:.1f}-second {profile.subject} segment sampled as "
+        f"{frame_count} frames in temporal order. Each image is preceded by a text "
+        f"token of the form `t=12.5s` giving its segment-relative timestamp; the "
+        f"same value is also burned into the top-left corner of the image as a "
+        f"backup.\n"
         f"{profile.prompt_hints}\n\n"
         f"Allowed category tags (subset only): {tax}\n\n"
-        f"TASK: split the segment into a sequence of distinct situations. A new\n"
-        f"situation begins whenever ANY of these change: the on-foot/in-vehicle\n"
-        f"state, the vehicle being driven, the wanted level, the activity\n"
-        f"(walking, driving, shooting, crashing), the on-screen event/mission\n"
-        f"text, or the location/environment. Each situation is a contiguous\n"
-        f"time window [start, end] in seconds RELATIVE TO THE SEGMENT START\n"
-        f"(0.0 = first frame, {duration:.1f} = last frame). Windows MUST NOT overlap.\n\n"
+        f"TASK: split the segment into a sequence of distinct situations.\n"
+        f"{profile.effective_boundary_rules()}\n"
+        f"Each situation is a contiguous time window [start, end] in seconds\n"
+        f"RELATIVE TO THE SEGMENT START (0.0 = first frame, {duration:.1f} = last\n"
+        f"frame). Windows MUST NOT overlap.\n\n"
         f"BOUNDARY PRECISION (this is the most important part — get the times right):\n"
         f"- Use the `t=X.Xs` text token preceding each frame to set start/end. The\n"
         f"  burned-in timecode is a backup; the text token is authoritative.\n"
@@ -248,15 +302,7 @@ def _build_prompt(profile: GameProfile, duration: float, frame_count: int) -> st
         f"  into one long event just because they happen back-to-back.\n"
         f"- Skip dull stretches (idling, menus, loading) by leaving gaps\n"
         f"  between events; do not pad to cover the whole segment.\n\n"
-        f"EXAMPLE for a 90-second clip where the player walks to a parked car,\n"
-        f"steals it, and gets chased by police — return THREE events, NOT one:\n"
-        f"{{\n"
-        f'  "events": [\n'
-        f'    {{"start": 0.0, "end": 18.0, "description": "Player walks down a city sidewalk past pedestrians toward a parked sedan.", "categories": ["cruising"], "base_interest": 20, "game_signals": {{"wanted_level": 0, "vehicles": [], "location": "Vinewood Boulevard"}}}},\n'
-        f'    {{"start": 18.0, "end": 38.0, "description": "Player pulls the driver out of a sedan and accelerates away; two stars appear in the HUD.", "categories": ["npc_chaos"], "base_interest": 55, "game_signals": {{"wanted_level": 2, "vehicles": ["sedan"], "events": [], "location": "Vinewood Boulevard"}}}},\n'
-        f'    {{"start": 38.0, "end": 90.0, "description": "High-speed chase on the freeway with two police cruisers in pursuit.", "categories": ["police_chase"], "base_interest": 85, "game_signals": {{"wanted_level": 3, "vehicles": ["sedan", "police_cruiser"], "events": [], "location": "Los Santos freeway"}}}}\n'
-        f"  ]\n"
-        f"}}\n\n"
+        f"{example}"
         f"REQUIRED JSON SHAPE (return JSON only, no prose, no code fences):\n"
         f"{{\n"
         f'  "events": [\n'

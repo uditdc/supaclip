@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 
 def _env(*names: str, default: str | None = None) -> str | None:
@@ -26,6 +27,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timestamps", help="start,end pairs file (required for --segmenter manual)")
     p.add_argument("--interval", type=float, default=60.0, help="window length for interval strategy")
     p.add_argument("--game-profile", default="gta", help="built-in profile name or path to JSON")
+    p.add_argument(
+        "--video-intro", default=None,
+        help="short text describing this video to give the analyzer context (synopsis, era, setting)",
+    )
+    p.add_argument(
+        "--video-intro-file", default=None,
+        help="path to a text file whose contents become the video intro",
+    )
+    p.add_argument(
+        "--character", action="append", default=[], metavar="SPEC",
+        help=(
+            'reference character: "name=img1[,img2,...][:description]". '
+            "Repeatable; repeats with the same name merge their images."
+        ),
+    )
+    p.add_argument(
+        "--context-file", default=None,
+        help='JSON file with {"intro": "...", "characters": [{"name", "image", "description"}]}',
+    )
     p.add_argument("--analyzer", choices=("gemma", "gemma-video"), default="gemma-video",
                    help="default: gemma-video (Google AI Studio, requires GEMINI_API_KEY); "
                         "use `gemma` for the OpenAI-compatible frames fallback")
@@ -50,6 +70,74 @@ def build_parser() -> argparse.ArgumentParser:
                    help="print the manifest(s) to stdout on completion")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
+
+
+def _parse_character_spec(spec: str) -> dict[str, Any]:
+    """Parse 'name=path1[,path2,...][:description]' into a Character-shaped dict.
+
+    Multiple images are comma-separated. The trailing ':description' is detected
+    by splitting on the LAST ':' and checking that the left side is a list of
+    comma-separated existing files; otherwise the whole RHS is treated as paths.
+    """
+    if "=" not in spec:
+        raise ValueError(
+            f"--character spec '{spec}' must look like 'name=path[,path...][:description]'"
+        )
+    name, rest = spec.split("=", 1)
+    name = name.strip()
+    if not name:
+        raise ValueError(f"--character spec '{spec}' is missing a name")
+    rest = rest.strip()
+    paths_str = rest
+    description = ""
+    if ":" in rest:
+        candidate_paths, candidate_desc = rest.rsplit(":", 1)
+        candidates = [s.strip() for s in candidate_paths.split(",") if s.strip()]
+        if candidates and all(Path(s).expanduser().is_file() for s in candidates):
+            paths_str = candidate_paths
+            description = candidate_desc.strip()
+    images = [s.strip() for s in paths_str.split(",") if s.strip()]
+    return {"name": name, "images": images, "description": description}
+
+
+def _build_video_context(args) -> "VideoContext | None":  # noqa: F821 - forward ref
+    from .profiles import Character, VideoContext
+
+    intro = (args.video_intro or "").strip()
+    if args.video_intro_file:
+        intro_path = Path(args.video_intro_file).expanduser()
+        intro = intro_path.read_text(encoding="utf-8").strip()
+
+    by_name: dict[str, Character] = {}
+    order: list[str] = []
+
+    def _add(ch: Character) -> None:
+        existing = by_name.get(ch.name)
+        if existing is None:
+            by_name[ch.name] = ch
+            order.append(ch.name)
+            return
+        # merge: union of images, prefer non-empty description
+        seen = set(existing.images)
+        for img in ch.images:
+            if img not in seen:
+                existing.images.append(img)
+                seen.add(img)
+        if not existing.description and ch.description:
+            existing.description = ch.description
+
+    if args.context_file:
+        bundled = VideoContext.load(args.context_file)
+        if not intro:
+            intro = bundled.intro
+        for ch in bundled.characters:
+            _add(ch)
+
+    for spec in args.character or []:
+        _add(Character.model_validate(_parse_character_spec(spec)))
+
+    ctx = VideoContext(intro=intro, characters=[by_name[n] for n in order])
+    return None if ctx.is_empty() else ctx
 
 
 def _load_dotenv_if_present() -> None:
@@ -87,6 +175,12 @@ def main(argv: list[str] | None = None) -> int:
             log.error(f"input not found: {v}")
             return 2
 
+    try:
+        context = _build_video_context(args)
+    except (ValueError, OSError) as e:
+        log.error(f"invalid context: {e}")
+        return 2
+
     cfg = ExtractConfig(
         videos=[str(Path(v).resolve()) for v in args.videos],
         output_dir=args.output,
@@ -109,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         keep_temp=args.keep_temp,
         verbose=args.verbose,
         no_chunk=args.no_chunk,
+        context=context,
     )
 
     try:

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 from ..analyze import SegmentAnalysis, SegmentEvent
-from ..profiles import GameProfile
+from ..profiles import GameProfile, VideoContext
 
 
 MIN_EVENT_DURATION = 2.0
@@ -175,3 +177,50 @@ def _signals_block(profile: GameProfile, indent: str = "      ") -> str:
 
 def _taxonomy_str(profile: GameProfile) -> str:
     return ", ".join(profile.taxonomy) if profile.taxonomy else "(none)"
+
+
+def _context_block(context: VideoContext | None) -> str:
+    """Render the user-supplied video intro + character refs as a prompt preamble."""
+    if context is None or context.is_empty():
+        return ""
+    parts: list[str] = ["VIDEO CONTEXT (provided by the user):"]
+    if context.intro.strip():
+        parts.append(context.intro.strip())
+    if context.characters:
+        parts.append("Reference characters who may appear:")
+        for i, ch in enumerate(context.characters, 1):
+            n = len(ch.images)
+            if n == 1:
+                marker = " (1 reference image provided)"
+            elif n > 1:
+                marker = f" ({n} reference images provided)"
+            else:
+                marker = ""
+            desc = f" — {ch.description.strip()}" if ch.description.strip() else ""
+            parts.append(f"  {i}. {ch.name}{marker}{desc}")
+        parts.append(
+            "When you recognize one of these characters in the footage, use the\n"
+            "exact name above in descriptions and signal fields. If unsure, do\n"
+            "NOT guess — describe them generically."
+        )
+    return "\n".join(parts) + "\n\n"
+
+
+def _context_fingerprint(context: VideoContext | None) -> str:
+    """Stable hash of context content (including image bytes) for cache keys."""
+    if context is None or context.is_empty():
+        return "no-context"
+    h = hashlib.sha256()
+    h.update(context.intro.strip().encode("utf-8"))
+    for ch in context.characters:
+        h.update(b"\x00")
+        h.update(ch.name.encode("utf-8"))
+        h.update(b"\x00")
+        h.update(ch.description.strip().encode("utf-8"))
+        for img in ch.images:
+            h.update(b"\x01")
+            try:
+                h.update(Path(img).read_bytes())
+            except OSError:
+                h.update(img.encode("utf-8"))
+    return h.hexdigest()[:16]
