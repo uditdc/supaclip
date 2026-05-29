@@ -17,8 +17,9 @@ from supaclip.stitch.reframe import build_reframe_filter
 
 def test_reframe_crop_center():
     f = build_reframe_filter("crop_center")
-    assert "scale=1080:1920:force_original_aspect_ratio=increase" in f
-    assert "crop=1080:1920:(in_w-out_w)/2:(in_h-out_h)/2" in f
+    assert "crop=min(in_w\\,in_h*1080/1920):min(in_h\\,in_w*1920/1080)" in f
+    assert "(in_w-out_w)/2:(in_h-out_h)/2" in f
+    assert "scale=1080:1920" in f
     assert "fps=60" in f
     assert "format=yuv420p" in f
 
@@ -26,8 +27,8 @@ def test_reframe_crop_center():
 def test_reframe_crop_left_right_have_offset_difference():
     left = build_reframe_filter("crop_left")
     right = build_reframe_filter("crop_right")
-    assert "crop=1080:1920:0:" in left
-    assert "crop=1080:1920:in_w-out_w:" in right
+    assert ":0:(in_h-out_h)/2" in left
+    assert ":in_w-out_w:(in_h-out_h)/2" in right
 
 
 def test_reframe_letterbox_uses_pad():
@@ -40,7 +41,7 @@ def test_reframe_letterbox_uses_pad():
 def test_reframe_custom_dimensions():
     f = build_reframe_filter("crop_center", dst_w=720, dst_h=1280, fps=30)
     assert "scale=720:1280" in f
-    assert "crop=720:1280" in f
+    assert "crop=min(in_w\\,in_h*720/1280):min(in_h\\,in_w*1280/720)" in f
     assert "fps=30" in f
 
 
