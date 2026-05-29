@@ -57,6 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-dedup", action="store_true")
     p.add_argument("--no-chunk", action="store_true",
                    help="disable audio-trough chunking + aggregator pass for long segments")
+    p.add_argument("--analyze-concurrency", type=int, default=4,
+                   help="number of analysis chunks to send to the vision model in "
+                        "parallel (default: 4; lower if you hit rate limits)")
     p.add_argument("--min-clip", type=float, default=15.0)
     p.add_argument("--max-clip", type=float, default=60.0)
     p.add_argument("--max-duration", type=float, default=5400.0)
@@ -203,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         keep_temp=args.keep_temp,
         verbose=args.verbose,
         no_chunk=args.no_chunk,
+        analyze_concurrency=args.analyze_concurrency,
         context=context,
     )
 
