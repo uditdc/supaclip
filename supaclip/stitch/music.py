@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from supaclip.catalog.search import get_clip
+from supaclip.core.clips import ClipSource
 from supaclip.core.edl import EDLMusic
 
 
@@ -25,18 +24,18 @@ class MusicPlan:
 CATALOG_PREFIX = "catalog:"
 
 
-def resolve_music_file(file_str: str, conn: sqlite3.Connection | None) -> str:
+def resolve_music_file(file_str: str, source: ClipSource | None) -> str:
     """Accept either a filesystem path or 'catalog:<clip_id>'."""
     if file_str.startswith(CATALOG_PREFIX):
-        if conn is None:
+        if source is None:
             raise FileNotFoundError(
-                f"music references catalog clip but no catalog connection provided: {file_str}"
+                f"music references catalog clip but no clip source provided: {file_str}"
             )
         try:
             clip_id = int(file_str[len(CATALOG_PREFIX):])
         except ValueError as e:
             raise FileNotFoundError(f"invalid catalog ref: {file_str!r}") from e
-        clip = get_clip(conn, clip_id)
+        clip = source.get_clip(clip_id)
         if clip is None:
             raise FileNotFoundError(f"music: clip_id={clip_id} not found")
         return clip.file

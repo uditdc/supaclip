@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import sqlite3
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from supaclip.catalog import connect, resolve_catalog_path
-from supaclip.catalog.search import ClipRow, get_clip
+from supaclip.core.clips import ClipSource
 from supaclip.core.edl import EDL, load_edl, save_edl, validate_edl
 from supaclip.core.ffmpeg import ensure_ffmpeg, probe, run_ffmpeg
 from supaclip.stitch.progress import ProgressEvent, run_ffmpeg_with_progress
@@ -53,6 +51,7 @@ def render(
     config: RenderConfig,
     log: Logger | None = None,
     progress: callable | None = None,
+    clip_source: ClipSource | None = None,
 ) -> RenderResult:
     log = log or Logger(verbose=config.verbose)
     ensure_ffmpeg()
@@ -71,14 +70,15 @@ def render(
         edl = _trim_to_single_cue(edl, config.preview_cue)
         log.info(f"preview mode: rendering only cue #{config.preview_cue}")
 
-    log.stage("connect catalog")
-    catalog_path = resolve_catalog_path(config.catalog_path)
-    log.info(f"catalog: {catalog_path}")
-    conn = connect(catalog_path)
+    if clip_source is None:
+        log.stage("connect catalog")
+        from supaclip.catalog.paths import resolve_catalog_path
+        from supaclip.catalog.source import SqliteClipSource
+        clip_source = SqliteClipSource.open(config.catalog_path)
+        log.info(f"catalog: {resolve_catalog_path(config.catalog_path)}")
 
     log.stage("validate EDL")
-    resolver = _build_resolver(conn)
-    issues = validate_edl(edl, resolver=resolver)
+    issues = validate_edl(edl, resolver=clip_source.get_clip)
     errors = [i for i in issues if i.severity == "error"]
     for i in issues:
         (log.error if i.severity == "error" else log.warn)(f"{i.path}: {i.message}")
@@ -86,7 +86,7 @@ def render(
         raise RenderError(f"EDL has {len(errors)} validation error(s); refusing to render")
 
     log.stage("resolve clips")
-    cue_inputs = _resolve_cue_inputs(conn, edl, log)
+    cue_inputs = _resolve_cue_inputs(clip_source, edl, log)
 
     voiceover_wav: Path | None = None
     alignment: Alignment | None = None
@@ -100,7 +100,7 @@ def render(
     music_plan = None
     if edl.music is not None:
         log.stage("resolve music")
-        music_path = resolve_music_file(edl.music.file, conn)
+        music_path = resolve_music_file(edl.music.file, clip_source)
         log.info(f"music: {music_path}")
         music_plan = build_music_plan(
             music=edl.music,
@@ -188,17 +188,11 @@ def render(
     )
 
 
-def _build_resolver(conn: sqlite3.Connection):
-    def resolve(clip_id: int) -> ClipRow | None:
-        return get_clip(conn, clip_id)
-    return resolve
-
-
-def _resolve_cue_inputs(conn: sqlite3.Connection, edl: EDL, log: Logger) -> list[CueInput]:
+def _resolve_cue_inputs(source: ClipSource, edl: EDL, log: Logger) -> list[CueInput]:
     cues: list[CueInput] = []
     probe_cache: dict[str, Any] = {}
     for i, cue in enumerate(edl.video):
-        clip = get_clip(conn, cue.clip_id)
+        clip = source.get_clip(cue.clip_id)
         if clip is None:
             raise RenderError(f"video[{i}]: clip_id={cue.clip_id} not found")
         if clip.file not in probe_cache:
