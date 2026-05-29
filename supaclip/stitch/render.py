@@ -34,6 +34,8 @@ class RenderConfig:
     verbose: bool = False
     print_only: bool = False
     preview_cue: int | None = None      # 0-based index; if set, only that cue is rendered
+    preset: str = "medium"
+    crf: int = 20
 
 
 @dataclass
@@ -157,6 +159,8 @@ def render(
         music_plan=music_plan,
         ost_renders=ost_renders,
         caption_renders=caption_renders,
+        preset=config.preset,
+        crf=config.crf,
     )
     out_path = Path(config.output_path).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -272,16 +276,26 @@ def _default_progress(log: Logger):
     return cb
 
 
-def _synthesize(
-    edl: EDL,
-    config: RenderConfig,
-    log: Logger,
+def synthesize_voiceover(
+    *,
+    backend: str,
+    voice_id: str,
+    settings: dict[str, float],
+    script: str,
+    api_key: str | None = None,
+    cache_dir: str = DEFAULT_CACHE_DIR,
+    use_cache: bool = True,
     want_alignment: bool = False,
+    log: Logger | None = None,
 ) -> tuple[Path, Alignment | None]:
-    assert edl.voiceover is not None
-    vo = edl.voiceover
-    cache = TTSCache(config.cache_dir, enabled=config.use_cache)
-    key = TTSCache.key(vo.backend, vo.voice_id, vo.settings, vo.script)
+    """Synthesize a voiceover wav, reusing the on-disk TTS cache.
+
+    Shared by the render pipeline and callers that need the voiceover (and its
+    alignment) ahead of render, so a single synthesis serves both.
+    """
+    log = log or Logger(verbose=False)
+    cache = TTSCache(cache_dir, enabled=use_cache)
+    key = TTSCache.key(backend, voice_id, settings, script)
 
     cached = cache.get(key)
     cached_align: Alignment | None = None
@@ -294,17 +308,15 @@ def _synthesize(
         log.success(f"cache hit: {cached}")
         return cached, cached_align
 
-    backend = get_backend(vo.backend, api_key=config.api_key)
+    be = get_backend(backend, api_key=api_key)
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp_path = Path(tmp.name)
 
     alignment: Alignment | None = None
     if want_alignment:
-        _, alignment = backend.synthesize_with_alignment(
-            vo.script, vo.voice_id, vo.settings, tmp_path,
-        )
+        _, alignment = be.synthesize_with_alignment(script, voice_id, settings, tmp_path)
     else:
-        backend.synthesize(vo.script, vo.voice_id, vo.settings, tmp_path)
+        be.synthesize(script, voice_id, settings, tmp_path)
 
     stored = cache.put(key, tmp_path)
     if stored is None:
@@ -314,3 +326,24 @@ def _synthesize(
         cache.put_alignment(key, alignment.to_dict())
     log.success(f"voiceover wav: {stored}")
     return stored, alignment
+
+
+def _synthesize(
+    edl: EDL,
+    config: RenderConfig,
+    log: Logger,
+    want_alignment: bool = False,
+) -> tuple[Path, Alignment | None]:
+    assert edl.voiceover is not None
+    vo = edl.voiceover
+    return synthesize_voiceover(
+        backend=vo.backend,
+        voice_id=vo.voice_id,
+        settings=vo.settings,
+        script=vo.script,
+        api_key=config.api_key,
+        cache_dir=config.cache_dir,
+        use_cache=config.use_cache,
+        want_alignment=want_alignment,
+        log=log,
+    )
