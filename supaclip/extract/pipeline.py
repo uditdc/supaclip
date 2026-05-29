@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,6 +66,7 @@ class ExtractConfig:
     keep_temp: bool
     verbose: bool
     no_chunk: bool = False
+    analyze_concurrency: int = 4
     context: VideoContext | None = None
 
 
@@ -138,51 +140,58 @@ def _run_one(
 
     log.stage(f"Analyze ({cfg.analyzer}/{cfg.llm})")
     ctx_fp = _context_fingerprint(cfg.context)
-    flat_events: list[dict] = []
-    for i, (start, end) in enumerate(ranges, 1):
-        chunks = [(start, end)] if cfg.no_chunk else chunk_segment(start, end, samples)
-        chunked = len(chunks) > 1
-        if chunked:
-            log.info(f"[{i}/{len(ranges)}] {start:.1f}-{end:.1f}s "
-                     f"({end - start:.1f}s) → {len(chunks)} chunks")
-        else:
-            log.info(f"[{i}/{len(ranges)}] analyzing {start:.1f}-{end:.1f}s ({end - start:.1f}s)")
+    tasks = _plan_chunks(ranges, samples, cfg, profile, fingerprint, ctx_fp, log)
 
-        for c_idx, (cs, ce) in enumerate(chunks, 1):
-            chunk_key = (
-                fingerprint, round(cs, 3), round(ce, 3),
-                cfg.analyzer, cfg.llm, profile.name, PROMPT_VERSION, ctx_fp,
+    payloads: list[list[dict] | None] = [None] * len(tasks)
+    pending: list[_ChunkTask] = []
+    for task in tasks:
+        cached_chunk = cache.get("analysis", task.key)
+        if cached_chunk is not None:
+            payloads[task.index] = cached_chunk
+            log.detail(f"  chunk {task.cs:.1f}-{task.ce:.1f}s cache hit "
+                       f"({len(cached_chunk)} events)")
+        else:
+            pending.append(task)
+
+    if pending:
+        def _analyze(task: _ChunkTask) -> list[dict]:
+            analysis = backend.analyze_segment(
+                video_path, task.cs, task.ce, profile, context=cfg.context,
             )
-            cached_chunk = cache.get("analysis", chunk_key)
-            if cached_chunk is not None:
-                if chunked:
-                    log.detail(f"  chunk {c_idx}/{len(chunks)} cache hit "
-                               f"{cs:.1f}-{ce:.1f}s ({len(cached_chunk)} events)")
-                payload = cached_chunk
-            else:
-                if chunked:
-                    log.detail(f"  chunk {c_idx}/{len(chunks)} analyzing {cs:.1f}-{ce:.1f}s")
-                analysis = backend.analyze_segment(
-                    video_path, cs, ce, profile, context=cfg.context,
-                )
-                payload = [
-                    {
-                        "start": ev.start,
-                        "end": ev.end,
-                        "description": ev.description,
-                        "categories": ev.categories,
-                        "base_interest": ev.base_interest,
-                        "game_signals": ev.game_signals,
-                    }
-                    for ev in analysis.events
-                ]
-                cache.set("analysis", chunk_key, payload)
-            for ev in payload:
-                flat_events.append({
-                    **ev,
-                    "start": float(ev.get("start", 0.0)) + cs,
-                    "end": float(ev.get("end", 0.0)) + cs,
-                })
+            return [
+                {
+                    "start": ev.start,
+                    "end": ev.end,
+                    "description": ev.description,
+                    "categories": ev.categories,
+                    "base_interest": ev.base_interest,
+                    "game_signals": ev.game_signals,
+                }
+                for ev in analysis.events
+            ]
+
+        workers = max(1, min(cfg.analyze_concurrency, len(pending)))
+        log.detail(f"analyzing {len(pending)} chunks (concurrency {workers})")
+        done = 0
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_analyze, task): task for task in pending}
+            for future in as_completed(futures):
+                task = futures[future]
+                payload = future.result()
+                cache.set("analysis", task.key, payload)
+                payloads[task.index] = payload
+                done += 1
+                log.detail(f"  [{done}/{len(pending)}] {task.cs:.1f}-{task.ce:.1f}s "
+                           f"→ {len(payload)} events")
+
+    flat_events: list[dict] = []
+    for task in tasks:
+        for ev in payloads[task.index] or []:
+            flat_events.append({
+                **ev,
+                "start": float(ev.get("start", 0.0)) + task.cs,
+                "end": float(ev.get("end", 0.0)) + task.cs,
+            })
 
     log.success(f"analyzed {len(ranges)} segments → {len(flat_events)} raw events")
 
@@ -281,6 +290,45 @@ def _run_one(
     save_manifest(manifest, manifest_path)
     log.success(f"wrote {len(clips)} clips and {manifest_path}")
     return manifest
+
+
+@dataclass
+class _ChunkTask:
+    index: int
+    cs: float
+    ce: float
+    key: tuple
+
+
+def _plan_chunks(
+    ranges: list[tuple[float, float]],
+    samples: list[tuple[float, float]],
+    cfg: ExtractConfig,
+    profile: GameProfile,
+    fingerprint: str,
+    ctx_fp: str,
+    log: Logger,
+) -> list[_ChunkTask]:
+    """Expand candidate ranges into the flat, ordered list of analysis chunks.
+
+    Order is preserved (segment, then chunk-within-segment) so reassembled
+    events stay deterministic regardless of completion order under concurrency.
+    """
+    tasks: list[_ChunkTask] = []
+    for seg_no, (start, end) in enumerate(ranges, 1):
+        chunks = [(start, end)] if cfg.no_chunk else chunk_segment(start, end, samples)
+        if len(chunks) > 1:
+            log.info(f"[{seg_no}/{len(ranges)}] {start:.1f}-{end:.1f}s "
+                     f"({end - start:.1f}s) → {len(chunks)} chunks")
+        else:
+            log.info(f"[{seg_no}/{len(ranges)}] {start:.1f}-{end:.1f}s ({end - start:.1f}s)")
+        for cs, ce in chunks:
+            key = (
+                fingerprint, round(cs, 3), round(ce, 3),
+                cfg.analyzer, cfg.llm, profile.name, PROMPT_VERSION, ctx_fp,
+            )
+            tasks.append(_ChunkTask(index=len(tasks), cs=cs, ce=ce, key=key))
+    return tasks
 
 
 def _resolve_output_dir(video_path: str, cfg: ExtractConfig) -> Path:

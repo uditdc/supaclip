@@ -19,7 +19,7 @@ class StubBackend:
         self._events = events
         self.calls: list[tuple[float, float]] = []
 
-    def analyze_segment(self, video_path, start, end, profile):
+    def analyze_segment(self, video_path, start, end, profile, context=None):
         self.calls.append((start, end))
         return SegmentAnalysis(events=list(self._events))
 
