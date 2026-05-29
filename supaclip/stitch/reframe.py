@@ -30,8 +30,10 @@ def build_reframe_filter(
     else:
         x_expr, y_expr = "(in_w-out_w)/2", "(in_h-out_h)/2"
 
+    crop_w = f"min(in_w\\,in_h*{dst_w}/{dst_h})"
+    crop_h = f"min(in_h\\,in_w*{dst_h}/{dst_w})"
     return (
-        f"scale={dst_w}:{dst_h}:force_original_aspect_ratio=increase,"
-        f"crop={dst_w}:{dst_h}:{x_expr}:{y_expr},"
+        f"crop={crop_w}:{crop_h}:{x_expr}:{y_expr},"
+        f"scale={dst_w}:{dst_h},"
         f"setsar=1,fps={fps},format=yuv420p"
     )

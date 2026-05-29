@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import sqlite3
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from supaclip.catalog import connect, resolve_catalog_path
-from supaclip.catalog.search import ClipRow, get_clip
+from supaclip.core.clips import ClipSource
 from supaclip.core.edl import EDL, load_edl, save_edl, validate_edl
 from supaclip.core.ffmpeg import ensure_ffmpeg, probe, run_ffmpeg
 from supaclip.stitch.progress import ProgressEvent, run_ffmpeg_with_progress
@@ -36,6 +34,8 @@ class RenderConfig:
     verbose: bool = False
     print_only: bool = False
     preview_cue: int | None = None      # 0-based index; if set, only that cue is rendered
+    preset: str = "medium"
+    crf: int = 20
 
 
 @dataclass
@@ -53,6 +53,7 @@ def render(
     config: RenderConfig,
     log: Logger | None = None,
     progress: callable | None = None,
+    clip_source: ClipSource | None = None,
 ) -> RenderResult:
     log = log or Logger(verbose=config.verbose)
     ensure_ffmpeg()
@@ -71,14 +72,15 @@ def render(
         edl = _trim_to_single_cue(edl, config.preview_cue)
         log.info(f"preview mode: rendering only cue #{config.preview_cue}")
 
-    log.stage("connect catalog")
-    catalog_path = resolve_catalog_path(config.catalog_path)
-    log.info(f"catalog: {catalog_path}")
-    conn = connect(catalog_path)
+    if clip_source is None:
+        log.stage("connect catalog")
+        from supaclip.catalog.paths import resolve_catalog_path
+        from supaclip.catalog.source import SqliteClipSource
+        clip_source = SqliteClipSource.open(config.catalog_path)
+        log.info(f"catalog: {resolve_catalog_path(config.catalog_path)}")
 
     log.stage("validate EDL")
-    resolver = _build_resolver(conn)
-    issues = validate_edl(edl, resolver=resolver)
+    issues = validate_edl(edl, resolver=clip_source.get_clip)
     errors = [i for i in issues if i.severity == "error"]
     for i in issues:
         (log.error if i.severity == "error" else log.warn)(f"{i.path}: {i.message}")
@@ -86,7 +88,7 @@ def render(
         raise RenderError(f"EDL has {len(errors)} validation error(s); refusing to render")
 
     log.stage("resolve clips")
-    cue_inputs = _resolve_cue_inputs(conn, edl, log)
+    cue_inputs = _resolve_cue_inputs(clip_source, edl, log)
 
     voiceover_wav: Path | None = None
     alignment: Alignment | None = None
@@ -100,7 +102,7 @@ def render(
     music_plan = None
     if edl.music is not None:
         log.stage("resolve music")
-        music_path = resolve_music_file(edl.music.file, conn)
+        music_path = resolve_music_file(edl.music.file, clip_source)
         log.info(f"music: {music_path}")
         music_plan = build_music_plan(
             music=edl.music,
@@ -157,6 +159,8 @@ def render(
         music_plan=music_plan,
         ost_renders=ost_renders,
         caption_renders=caption_renders,
+        preset=config.preset,
+        crf=config.crf,
     )
     out_path = Path(config.output_path).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -188,17 +192,11 @@ def render(
     )
 
 
-def _build_resolver(conn: sqlite3.Connection):
-    def resolve(clip_id: int) -> ClipRow | None:
-        return get_clip(conn, clip_id)
-    return resolve
-
-
-def _resolve_cue_inputs(conn: sqlite3.Connection, edl: EDL, log: Logger) -> list[CueInput]:
+def _resolve_cue_inputs(source: ClipSource, edl: EDL, log: Logger) -> list[CueInput]:
     cues: list[CueInput] = []
     probe_cache: dict[str, Any] = {}
     for i, cue in enumerate(edl.video):
-        clip = get_clip(conn, cue.clip_id)
+        clip = source.get_clip(cue.clip_id)
         if clip is None:
             raise RenderError(f"video[{i}]: clip_id={cue.clip_id} not found")
         if clip.file not in probe_cache:
@@ -278,16 +276,26 @@ def _default_progress(log: Logger):
     return cb
 
 
-def _synthesize(
-    edl: EDL,
-    config: RenderConfig,
-    log: Logger,
+def synthesize_voiceover(
+    *,
+    backend: str,
+    voice_id: str,
+    settings: dict[str, float],
+    script: str,
+    api_key: str | None = None,
+    cache_dir: str = DEFAULT_CACHE_DIR,
+    use_cache: bool = True,
     want_alignment: bool = False,
+    log: Logger | None = None,
 ) -> tuple[Path, Alignment | None]:
-    assert edl.voiceover is not None
-    vo = edl.voiceover
-    cache = TTSCache(config.cache_dir, enabled=config.use_cache)
-    key = TTSCache.key(vo.backend, vo.voice_id, vo.settings, vo.script)
+    """Synthesize a voiceover wav, reusing the on-disk TTS cache.
+
+    Shared by the render pipeline and callers that need the voiceover (and its
+    alignment) ahead of render, so a single synthesis serves both.
+    """
+    log = log or Logger(verbose=False)
+    cache = TTSCache(cache_dir, enabled=use_cache)
+    key = TTSCache.key(backend, voice_id, settings, script)
 
     cached = cache.get(key)
     cached_align: Alignment | None = None
@@ -300,17 +308,15 @@ def _synthesize(
         log.success(f"cache hit: {cached}")
         return cached, cached_align
 
-    backend = get_backend(vo.backend, api_key=config.api_key)
+    be = get_backend(backend, api_key=api_key)
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp_path = Path(tmp.name)
 
     alignment: Alignment | None = None
     if want_alignment:
-        _, alignment = backend.synthesize_with_alignment(
-            vo.script, vo.voice_id, vo.settings, tmp_path,
-        )
+        _, alignment = be.synthesize_with_alignment(script, voice_id, settings, tmp_path)
     else:
-        backend.synthesize(vo.script, vo.voice_id, vo.settings, tmp_path)
+        be.synthesize(script, voice_id, settings, tmp_path)
 
     stored = cache.put(key, tmp_path)
     if stored is None:
@@ -320,3 +326,24 @@ def _synthesize(
         cache.put_alignment(key, alignment.to_dict())
     log.success(f"voiceover wav: {stored}")
     return stored, alignment
+
+
+def _synthesize(
+    edl: EDL,
+    config: RenderConfig,
+    log: Logger,
+    want_alignment: bool = False,
+) -> tuple[Path, Alignment | None]:
+    assert edl.voiceover is not None
+    vo = edl.voiceover
+    return synthesize_voiceover(
+        backend=vo.backend,
+        voice_id=vo.voice_id,
+        settings=vo.settings,
+        script=vo.script,
+        api_key=config.api_key,
+        cache_dir=config.cache_dir,
+        use_cache=config.use_cache,
+        want_alignment=want_alignment,
+        log=log,
+    )

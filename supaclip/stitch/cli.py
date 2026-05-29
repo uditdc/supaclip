@@ -148,8 +148,7 @@ def _cmd_render(args) -> int:
 
 
 def _cmd_validate(args) -> int:
-    from supaclip.catalog import connect, resolve_catalog_path
-    from supaclip.catalog.search import get_clip
+    from supaclip.catalog.source import SqliteClipSource
     from supaclip.core.edl import load_edl, validate_edl
     from supaclip.core.log import Logger
 
@@ -160,8 +159,8 @@ def _cmd_validate(args) -> int:
         log.error(str(e))
         return 2
 
-    conn = connect(resolve_catalog_path(args.catalog))
-    issues = validate_edl(edl, resolver=lambda cid: get_clip(conn, cid))
+    source = SqliteClipSource.open(args.catalog)
+    issues = validate_edl(edl, resolver=source.get_clip)
 
     if args.emit_json:
         json.dump({
