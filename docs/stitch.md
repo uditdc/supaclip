@@ -109,9 +109,17 @@ Top-level optional fields:
   "max_words": 4,
   "max_chars": 28,
   "min_chunk_duration": 0.4,
-  "font_size": null                     // optional override (pixels)
+  "font_size": null,                    // optional override (pixels)
+  "highlight": "none",                  // none | karaoke_fill
+  "highlight_color": "#FFD600"          // fill color when highlight=karaoke_fill
 }
 ```
+
+When `highlight` is `karaoke_fill`, each phrase stays on screen while words
+fill with `highlight_color` one at a time as they're spoken (word timing comes
+from the same TTS alignment). `clean_white` + `karaoke_fill` gives the classic
+white→yellow sweep. Requires a backend that returns timestamps (`elevenlabs`);
+the `google` backend has no alignment, so use `highlight: none` there.
 
 ### Speech-synced captions vs OST
 

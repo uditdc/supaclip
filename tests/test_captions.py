@@ -19,6 +19,7 @@ from supaclip.stitch.captions import (
     build_caption_overlay_chain,
     chunk_alignment,
     render_caption_pngs,
+    _hex_to_rgba,
 )
 from supaclip.stitch.tts.base import Alignment
 
@@ -162,6 +163,73 @@ def test_build_caption_overlay_chain_chains_multiple(tmp_path: Path):
     assert chains[0].startswith("[vost_out][10:v]overlay=")
     assert chains[-1].endswith("[vout]")
     assert "[vcap0]" in chains[1]
+
+
+def test_chunk_alignment_attaches_word_timing():
+    align = _alignment_from_text("one two three", char_dur=0.1)
+    [chunk] = chunk_alignment(align, max_words=10, max_chars=100,
+                              min_chunk_duration=0.0)
+    assert [w.text for w in chunk.words] == ["one", "two", "three"]
+    assert chunk.words[0].start == pytest.approx(chunk.start)
+    for a, b in zip(chunk.words, chunk.words[1:]):
+        assert a.start < b.start
+
+
+def test_hex_to_rgba():
+    assert _hex_to_rgba("#FFD600") == (255, 214, 0, 255)
+    assert _hex_to_rgba("#00000080") == (0, 0, 0, 128)
+
+
+def test_karaoke_fill_emits_one_render_per_word(tmp_path: Path):
+    align = _alignment_from_text("one two three", char_dur=0.1)
+    chunks = chunk_alignment(align, max_words=10, max_chars=100,
+                             min_chunk_duration=0.0)
+    cfg = EDLCaptions(highlight="karaoke_fill")
+    renders = render_caption_pngs(
+        chunks=chunks, config=cfg,
+        out_w=1080, out_h=1920, cache_dir=tmp_path,
+    )
+    assert len(renders) == 3
+    for r in renders:
+        assert r.png_path.exists()
+
+
+def test_karaoke_fill_windows_are_contiguous_and_share_position(tmp_path: Path):
+    align = _alignment_from_text("one two three", char_dur=0.1)
+    [chunk] = chunk_alignment(align, max_words=10, max_chars=100,
+                              min_chunk_duration=0.0)
+    cfg = EDLCaptions(highlight="karaoke_fill")
+    renders = render_caption_pngs(
+        chunks=[chunk], config=cfg,
+        out_w=1080, out_h=1920, cache_dir=tmp_path,
+    )
+    assert renders[0].start == pytest.approx(chunk.start)
+    assert renders[-1].end == pytest.approx(chunk.end)
+    for a, b in zip(renders, renders[1:]):
+        assert a.end == pytest.approx(b.start)
+    assert len({(r.x, r.y) for r in renders}) == 1
+
+
+def test_karaoke_variants_have_distinct_pngs(tmp_path: Path):
+    align = _alignment_from_text("one two three", char_dur=0.1)
+    chunks = chunk_alignment(align, max_words=10, max_chars=100,
+                             min_chunk_duration=0.0)
+    renders = render_caption_pngs(
+        chunks=chunks, config=EDLCaptions(highlight="karaoke_fill"),
+        out_w=1080, out_h=1920, cache_dir=tmp_path,
+    )
+    assert len({r.png_path for r in renders}) == 3
+
+
+def test_validate_rejects_bad_highlight_color():
+    vo = EDLVoiceover(voice_id="v", script="hi")
+    edl = _make_edl(
+        captions=EDLCaptions(highlight="karaoke_fill", highlight_color="yellow"),
+        voiceover=vo,
+    )
+    issues = validate_edl(edl)
+    assert any(i.path == "captions.highlight_color" and i.severity == "error"
+               for i in issues)
 
 
 def test_all_styles_and_positions_have_presets():

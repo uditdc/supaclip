@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -16,6 +17,7 @@ OSTPosition = Literal["top", "middle", "bottom"]
 WatermarkPosition = Literal["top", "middle", "bottom"]
 CaptionStyleName = Literal["clean_white", "boxed_dark", "karaoke_yellow"]
 CaptionPosition = Literal["top", "middle", "bottom", "lower_third"]
+CaptionHighlight = Literal["none", "karaoke_fill"]
 TTSBackendName = Literal["elevenlabs", "google"]
 EffectKind = Literal["none", "freeze_first", "ken_burns_in", "ken_burns_out", "slow_mo"]
 TransitionKind = Literal["cut", "crossfade"]
@@ -111,6 +113,8 @@ class EDLCaptions(BaseModel):
     max_chars: int = 28
     min_chunk_duration: float = 0.4
     font_size: int | None = None
+    highlight: CaptionHighlight = "none"
+    highlight_color: str = "#FFD600"
 
 
 class EDLOSTCue(BaseModel):
@@ -165,6 +169,11 @@ class ClipResolver(Protocol):
 
 
 _EPS = 1e-3
+_HEX_COLOR = re.compile(r"^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
+
+
+def _is_hex_color(value: str) -> bool:
+    return bool(_HEX_COLOR.match(value))
 
 
 def validate_edl(edl: EDL, resolver: ClipResolver | None = None) -> list[ValidationIssue]:
@@ -329,6 +338,11 @@ def validate_edl(edl: EDL, resolver: ClipResolver | None = None) -> list[Validat
         if edl.captions.font_size is not None and edl.captions.font_size <= 0:
             issues.append(ValidationIssue(
                 "error", "captions.font_size", "must be > 0",
+            ))
+        if edl.captions.highlight != "none" and not _is_hex_color(edl.captions.highlight_color):
+            issues.append(ValidationIssue(
+                "error", "captions.highlight_color",
+                f"must be a hex color like '#FFD600'; got {edl.captions.highlight_color!r}",
             ))
 
     if edl.music is not None and edl.music.duck and edl.voiceover is None:

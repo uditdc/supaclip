@@ -82,10 +82,18 @@ CAPTION_POSITION_FRACTION: dict[CaptionPosition, float] = {
 
 
 @dataclass(frozen=True)
+class CaptionWord:
+    text: str
+    start: float
+    end: float
+
+
+@dataclass(frozen=True)
 class CaptionChunk:
     text: str
     start: float
     end: float
+    words: tuple[CaptionWord, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -175,7 +183,50 @@ def chunk_alignment(
                 start=cleaned[i].start,
                 end=cleaned[i + 1].start,
             )
-    return cleaned
+
+    return _attach_words(cleaned, _extract_words(alignment))
+
+
+def _extract_words(alignment: Alignment) -> list[CaptionWord]:
+    """Split the character-level alignment into whitespace-delimited words,
+    each timed from its first character's start to its last character's end."""
+    words: list[CaptionWord] = []
+    buf: list[str] = []
+    start: float | None = None
+    end = 0.0
+    for ch, s, e in zip(alignment.characters, alignment.start_times, alignment.end_times):
+        if ch.isspace():
+            if buf:
+                words.append(CaptionWord("".join(buf), start, end))
+                buf, start = [], None
+        else:
+            if start is None:
+                start = s
+            buf.append(ch)
+            end = e
+    if buf:
+        words.append(CaptionWord("".join(buf), start, end))
+    return words
+
+
+def _attach_words(
+    chunks: list[CaptionChunk], words: list[CaptionWord]
+) -> list[CaptionChunk]:
+    """Bucket words into the chunks they belong to by start time. Chunk starts
+    are word-aligned, so a greedy pointer assigns each word to its chunk."""
+    out: list[CaptionChunk] = []
+    wi = 0
+    for i, chunk in enumerate(chunks):
+        next_start = chunks[i + 1].start if i + 1 < len(chunks) else float("inf")
+        bucket: list[CaptionWord] = []
+        while wi < len(words) and words[wi].start < next_start - 1e-6:
+            bucket.append(words[wi])
+            wi += 1
+        out.append(CaptionChunk(
+            text=chunk.text, start=chunk.start, end=chunk.end,
+            words=tuple(bucket),
+        ))
+    return out
 
 
 def _png_filename(chunk: CaptionChunk, style: CaptionStyleName,
@@ -239,6 +290,112 @@ def _render_caption_png(
     return png_w, png_h
 
 
+def _hex_to_rgba(value: str) -> RGBA:
+    s = value.lstrip("#")
+    r, g, b = int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16)
+    a = int(s[6:8], 16) if len(s) == 8 else 255
+    return (r, g, b, a)
+
+
+def _pack_words(
+    display_words: list[str], font: ImageFont.FreeTypeFont, max_width: int
+) -> list[list[tuple[int, str]]]:
+    """Greedy word-wrap that keeps each word's original index for coloring."""
+    space_w = font.getlength(" ")
+    lines: list[list[tuple[int, str]]] = []
+    cur: list[tuple[int, str]] = []
+    cur_w = 0.0
+    for idx, word in enumerate(display_words):
+        word_w = font.getlength(word)
+        advance = word_w if not cur else space_w + word_w
+        if cur and cur_w + advance > max_width:
+            lines.append(cur)
+            cur, cur_w = [], 0.0
+            advance = word_w
+        cur.append((idx, word))
+        cur_w += advance
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _karaoke_png_filename(
+    chunk: CaptionChunk, active: int, style: CaptionStyleName,
+    font_size: int, highlight_color: str, out_w: int, out_h: int,
+) -> str:
+    key = (f"karaoke|{chunk.text}|{active}|{style}|{font_size}"
+           f"|{highlight_color}|{out_w}x{out_h}")
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+    return f"capk-{digest}.png"
+
+
+def _render_caption_karaoke_png(
+    words: list[str],
+    active_index: int,
+    style: CaptionVisualStyle,
+    highlight: RGBA,
+    out_w: int,
+    fontfile: str | None,
+    dest: Path,
+) -> tuple[int, int]:
+    """Render the full phrase with words 0..active_index in `highlight` and the
+    rest in `style.fg`, laying words out individually so each can be colored."""
+    display_words = [w.upper() for w in words] if style.uppercase else list(words)
+    font_path = _resolve_font(fontfile)
+
+    max_text_width = int(out_w * 0.88) - 2 * style.padding_x
+    font_size = style.font_size
+    while font_size >= 28:
+        font = ImageFont.truetype(font_path, font_size)
+        lines = _pack_words(display_words, font, max_text_width)
+        block_w = max(_line_width(line, font) for line in lines)
+        if block_w <= max_text_width or font_size == 28:
+            break
+        font_size -= 4
+
+    font = ImageFont.truetype(font_path, font_size)
+    lines = _pack_words(display_words, font, max_text_width)
+    space_w = font.getlength(" ")
+    ascent, descent = font.getmetrics()
+    line_h = ascent + descent
+    block_w = max(_line_width(line, font) for line in lines)
+    block_h = line_h * len(lines) + style.line_spacing * max(0, len(lines) - 1)
+
+    png_w = int(block_w) + 2 * style.padding_x
+    png_h = block_h + 2 * style.padding_y
+
+    img = Image.new("RGBA", (png_w, png_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    if style.bg[3] > 0:
+        draw.rounded_rectangle(
+            (0, 0, png_w - 1, png_h - 1), radius=style.corner_radius, fill=style.bg,
+        )
+
+    y = style.padding_y
+    for line in lines:
+        x = (png_w - int(_line_width(line, font))) // 2
+        for idx, word in line:
+            color = highlight if idx <= active_index else style.fg
+            if style.stroke is not None and style.stroke_width > 0:
+                draw.text((x, y), word, font=font, fill=color,
+                          stroke_width=style.stroke_width, stroke_fill=style.stroke)
+            else:
+                draw.text((x, y), word, font=font, fill=color)
+            x += int(font.getlength(word) + space_w)
+        y += line_h + style.line_spacing
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    img.save(dest, format="PNG")
+    return png_w, png_h
+
+
+def _line_width(line: list[tuple[int, str]], font: ImageFont.FreeTypeFont) -> float:
+    if not line:
+        return 0.0
+    space_w = font.getlength(" ")
+    return sum(font.getlength(w) for _, w in line) + space_w * (len(line) - 1)
+
+
 def render_caption_pngs(
     chunks: list[CaptionChunk],
     config: EDLCaptions,
@@ -263,7 +420,24 @@ def render_caption_pngs(
             uppercase=preset.uppercase,
         )
 
-    renders: list[CaptionRender] = []
+    def _place(png_w: int, png_h: int) -> tuple[int, int]:
+        x = (out_w - png_w) // 2
+        anchor = CAPTION_POSITION_FRACTION[config.position]
+        y = int(out_h * anchor) - png_h // 2
+        return x, max(0, min(y, out_h - png_h))
+
+    if config.highlight == "karaoke_fill":
+        highlight_rgba = _hex_to_rgba(config.highlight_color)
+        renders: list[CaptionRender] = []
+        for i, chunk in enumerate(chunks):
+            for r in _karaoke_chunk_renders(
+                chunk, i, config, preset, highlight_rgba,
+                out_w, out_h, cache_dir, voiceover_offset, fontfile, _place,
+            ):
+                renders.append(r)
+        return renders
+
+    renders = []
     for i, chunk in enumerate(chunks):
         png_path = cache_dir / _png_filename(
             chunk, config.style, preset.font_size, out_w, out_h,
@@ -275,10 +449,7 @@ def render_caption_pngs(
             fontfile=fontfile,
             dest=png_path,
         )
-        x = (out_w - png_w) // 2
-        anchor = CAPTION_POSITION_FRACTION[config.position]
-        y = int(out_h * anchor) - png_h // 2
-        y = max(0, min(y, out_h - png_h))
+        x, y = _place(png_w, png_h)
         renders.append(CaptionRender(
             chunk_index=i,
             png_path=png_path,
@@ -286,6 +457,57 @@ def render_caption_pngs(
             y=y,
             start=chunk.start + voiceover_offset,
             end=chunk.end + voiceover_offset,
+        ))
+    return renders
+
+
+def _karaoke_chunk_renders(
+    chunk: CaptionChunk,
+    chunk_index: int,
+    config: EDLCaptions,
+    preset: CaptionVisualStyle,
+    highlight: RGBA,
+    out_w: int,
+    out_h: int,
+    cache_dir: Path,
+    voiceover_offset: float,
+    fontfile: str | None,
+    place,
+) -> list[CaptionRender]:
+    """One render per word: a progressively-filled variant of the whole phrase,
+    each visible for that word's spoken window."""
+    words = chunk.words
+    if not words:
+        png_path = cache_dir / _png_filename(
+            chunk, config.style, preset.font_size, out_w, out_h,
+        )
+        png_w, png_h = _render_caption_png(
+            text=chunk.text, style=preset, out_w=out_w,
+            fontfile=fontfile, dest=png_path,
+        )
+        x, y = place(png_w, png_h)
+        return [CaptionRender(
+            chunk_index=chunk_index, png_path=png_path, x=x, y=y,
+            start=chunk.start + voiceover_offset, end=chunk.end + voiceover_offset,
+        )]
+
+    word_texts = [w.text for w in words]
+    renders: list[CaptionRender] = []
+    for j, word in enumerate(words):
+        png_path = cache_dir / _karaoke_png_filename(
+            chunk, j, config.style, preset.font_size,
+            config.highlight_color, out_w, out_h,
+        )
+        png_w, png_h = _render_caption_karaoke_png(
+            words=word_texts, active_index=j, style=preset, highlight=highlight,
+            out_w=out_w, fontfile=fontfile, dest=png_path,
+        )
+        x, y = place(png_w, png_h)
+        window_end = words[j + 1].start if j + 1 < len(words) else chunk.end
+        renders.append(CaptionRender(
+            chunk_index=chunk_index, png_path=png_path, x=x, y=y,
+            start=word.start + voiceover_offset,
+            end=window_end + voiceover_offset,
         ))
     return renders
 
