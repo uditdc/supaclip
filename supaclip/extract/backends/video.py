@@ -32,8 +32,15 @@ MAX_API_ATTEMPTS = 3
 RETRY_BACKOFF_SECONDS = (2.0, 5.0, 15.0)
 
 
-class GemmaVideoBackend:
-    name = "gemma-video"
+class VideoBackend:
+    """Full-video analysis: uploads an entire (chunked) clip to Google AI Studio.
+
+    The whole video stream is sent to the model rather than sampled frames, so
+    this backend is Google-specific and validates that a Google AI Studio key is
+    available at construction time.
+    """
+
+    name = "video"
 
     def __init__(self, model: str, base_url: str, api_key: str | None) -> None:
         self.model = _normalize_model(model)
@@ -42,8 +49,10 @@ class GemmaVideoBackend:
         self.api_key = env_key or forwarded
         if not self.api_key:
             raise ValueError(
-                "gemma-video requires a Google AI Studio key. Set GEMINI_API_KEY "
-                "(or GOOGLE_API_KEY), or pass --api-key with an AIza... key."
+                "the 'video' analyzer sends the full video to Google AI Studio and "
+                "requires a Google AI Studio key. Set GEMINI_API_KEY (or "
+                "GOOGLE_API_KEY), or pass --api-key with an AIza... key. To analyze "
+                "with a non-Google model, use --analyzer frames instead."
             )
 
     def _client(self):
@@ -182,7 +191,7 @@ class GemmaVideoBackend:
                     min(attempt - 1, len(RETRY_BACKOFF_SECONDS) - 1)
                 ]
                 sys.stderr.write(
-                    f"  ! gemma-video {chunk_start:.1f}-{chunk_end:.1f}s attempt {attempt}"
+                    f"  ! video {chunk_start:.1f}-{chunk_end:.1f}s attempt {attempt}"
                     f"/{MAX_API_ATTEMPTS} failed ({desc}); retrying in {backoff:.0f}s\n"
                 )
                 time.sleep(backoff)
@@ -363,7 +372,7 @@ def _is_retryable(exc: Exception) -> bool:
 
 def _log_chunk_error(start: float, end: float, model: str, err: str) -> None:
     sys.stderr.write(
-        f"  ✗ gemma-video chunk {start:.1f}-{end:.1f}s ({model}) failed: {err}\n"
+        f"  ✗ video chunk {start:.1f}-{end:.1f}s ({model}) failed: {err}\n"
     )
 
 

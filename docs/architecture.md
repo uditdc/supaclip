@@ -68,8 +68,8 @@ supaclip/
 │   ├── dedupe.py              IoU-based temporal merge of candidate ranges
 │   ├── backends/
 │   │   ├── _shared.py         JSON parsing + event coercion helpers
-│   │   ├── gemma.py           OpenAI-compat backend (Ollama / vLLM / etc.)
-│   │   └── gemma_video.py     Google AI Studio video backend
+│   │   ├── frames.py          OpenAI-compat sprite-grid backend (Ollama / vLLM / etc.)
+│   │   └── video.py           Google AI Studio full-video backend
 │   ├── debug.py / debug_cli.py    dump prompt payload for one segment
 │   └── dry_chunk.py           preview chunking without analysing
 │
@@ -146,12 +146,14 @@ collapses temporally overlapping ranges (IoU ≥ `--dedup-iou`).
 `extract/analyze.py:build_backend(name, model, base_url, api_key)` picks one
 of two implementations. Both produce `SegmentAnalysis(events=[SegmentEvent])`.
 
-- **`gemma`** (default) — sends N keyframes from the segment to an
-  OpenAI-compatible vision endpoint (local Ollama, vLLM, etc.). One call per
-  segment-or-chunk.
-- **`gemma-video`** — uploads (or inlines, if < 15 MB) the actual segment
-  video to Google AI Studio Files API, transcoded to 720p / 800 kbps / 24 fps
-  in chunks of ≤ 480s; retries on transient errors.
+- **`video`** (default) — full-video analysis. Uploads (or inlines, if < 15 MB)
+  the actual segment video to Google AI Studio Files API, transcoded to
+  720p / 800 kbps / 24 fps in chunks of ≤ 480s; retries on transient errors.
+  Google-specific; validates a Google AI Studio key at construction.
+- **`frames`** — short-frame analysis. Samples a few frames (≤ 16) into a single
+  near-square sprite grid and sends that one image to any OpenAI-compatible
+  vision endpoint (local Ollama, vLLM, etc.). Model-agnostic; validates an
+  endpoint + model id at construction. One call per segment-or-chunk.
 
 Both share `backends/_shared.py` for JSON parsing, event coercion against the
 profile taxonomy, overlap pruning, and prompt scaffolding.
@@ -180,7 +182,7 @@ signals, and timestamps — but no images. It merges:
 - back-to-back events describing one continuous situation.
 
 The aggregator's transport is selected by `pipeline._build_agg_config`:
-OpenAI-compat for `gemma`, Google AI Studio for `gemma-video`. On any
+OpenAI-compat for `frames`, Google AI Studio for `video`. On any
 failure the input event list is returned unchanged so the pipeline always
 produces output. Finally `_enforce_min_duration()` extends or drops events
 shorter than `MIN_CLIP_SECONDS` (10s).

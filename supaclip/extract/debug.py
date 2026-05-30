@@ -9,7 +9,7 @@ from typing import Any
 
 from ..core.ffmpeg import extract_loudness_curve
 from .audio import detect_peaks
-from .backends.gemma import GemmaBackend, PreparedRequest
+from .backends.frames import FramesBackend, PreparedRequest
 from .chunking import chunk_segment
 from .profiles import GameProfile
 
@@ -33,7 +33,7 @@ class ChunkedDebugResult:
 
 
 def write_chunked_debug_dump(
-    backend: GemmaBackend,
+    backend: FramesBackend,
     source_path: str,
     start: float,
     end: float,
@@ -134,7 +134,7 @@ def write_chunked_debug_dump(
 
         if write_videos and full_padded is not None:
             try:
-                _render_gemma_view(prepared, chunk_dir / "gemma_view.mp4")
+                _render_frames_view(prepared, chunk_dir / "frames_view.mp4")
                 _slice_padded_source(
                     full_padded, cs - start, ce - cs,
                     chunk_dir / "source_segment.mp4",
@@ -175,6 +175,9 @@ def write_debug_dump(
         dst = frames_dir / f"f{f.idx:02d}_t{f.t_rel:07.3f}.jpg"
         shutil.copyfile(f.main_path, dst)
 
+    if prepared.sprite_path is not None and prepared.sprite_path.exists():
+        shutil.copyfile(prepared.sprite_path, out_dir / "sprite.jpg")
+
     summary = _build_summary(prepared)
     (out_dir / "summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8",
@@ -190,7 +193,7 @@ def write_debug_dump(
 
     if write_videos and prepared.frames:
         try:
-            _render_gemma_view(prepared, out_dir / "gemma_view.mp4")
+            _render_frames_view(prepared, out_dir / "frames_view.mp4")
             _render_source_segment(prepared, out_dir / "source_segment.mp4")
         except subprocess.CalledProcessError as e:
             (out_dir / "video_error.txt").write_text(
@@ -231,23 +234,25 @@ def _build_summary(prepared: PreparedRequest) -> dict[str, Any]:
         ],
         "tokens": {
             "prompt_text_estimate": prompt_tokens,
-            "images": len(prepared.frames),
+            "images": 1,
+            "grid": list(prepared.grid),
             "estimated_total": prompt_tokens + image_tokens,
             "tokens_per_tile_assumed": TOKENS_PER_TILE_ESTIMATE,
-            "method": "256 tokens/tile assuming no pan-and-scan (verify with usage.prompt_tokens after one real call)",
+            "method": "256 tokens/cell × cells in the sprite (verify with usage.prompt_tokens after one real call)",
         },
         "ffmpeg_command": prepared.ffmpeg_command,
     }
 
 
 def _build_request_body(prepared: PreparedRequest) -> dict[str, Any]:
-    content: list[dict[str, Any]] = [{"type": "text", "text": prepared.prompt}]
-    for f in prepared.frames:
-        content.append({"type": "text", "text": f"t={f.t_rel:.1f}s"})
-        content.append({
+    cols, rows = prepared.grid
+    content: list[dict[str, Any]] = [
+        {"type": "text", "text": prepared.prompt},
+        {
             "type": "image_url",
-            "image_url": {"url": f"<image: f{f.idx:02d}_t{f.t_rel:07.3f}.jpg>"},
-        })
+            "image_url": {"url": f"<sprite: {cols}x{rows} grid of {len(prepared.frames)} frames — sprite.jpg>"},
+        },
+    ]
     return {
         "model": prepared.model,
         "base_url": prepared.base_url,
@@ -259,7 +264,7 @@ def _build_request_body(prepared: PreparedRequest) -> dict[str, Any]:
     }
 
 
-def _render_gemma_view(prepared: PreparedRequest, out_path: Path) -> None:
+def _render_frames_view(prepared: PreparedRequest, out_path: Path) -> None:
     frames = prepared.frames
     if not frames:
         return
@@ -326,17 +331,20 @@ video{{max-width:100%;border:1px solid #444;}}</style></head><body>
 <p>model: <code>{prepared.model}</code> · profile: <code>{prepared.profile_name}</code></p>
 
 <h2>Stats</h2>
-<pre>frames sent: {len(prepared.frames)}
-est tokens:  {tok['estimated_total']} (prompt {tok['prompt_text_estimate']} + {tok['images']} images @ {tok['tokens_per_tile_assumed']} tok/tile)
-tile size:   {prepared.config['tile_px']}² (square — no pan-and-scan)</pre>
+<pre>frames sent: {len(prepared.frames)} in 1 sprite ({prepared.grid[0]}×{prepared.grid[1]} grid)
+est tokens:  {tok['estimated_total']} (prompt {tok['prompt_text_estimate']} + {len(prepared.frames)} cells @ {tok['tokens_per_tile_assumed']} tok/cell)
+tile size:   {prepared.config['tile_px']}² per cell (square — no pan-and-scan)</pre>
 
-<h2>Source segment vs. what Gemma sees</h2>
+<h2>Source segment vs. what the model sees</h2>
 <div style="display:flex;gap:12px;flex-wrap:wrap;">
   <div><div style="font-family:monospace;color:#7af;">SOURCE ({prepared.duration:.1f}s)</div>
        <video controls width="448" src="source_segment.mp4"></video></div>
-  <div><div style="font-family:monospace;color:#7af;">WHAT GEMMA SEES ({len(prepared.frames)} frames × 1s)</div>
-       <video controls width="448" src="gemma_view.mp4"></video></div>
+  <div><div style="font-family:monospace;color:#7af;">FRAMES PREVIEW ({len(prepared.frames)} frames × 1s)</div>
+       <video controls width="448" src="frames_view.mp4"></video></div>
 </div>
+
+<h2>Sprite sent to the model ({prepared.grid[0]}×{prepared.grid[1]} grid)</h2>
+<img src="sprite.jpg" style="max-width:100%;border:1px solid #444;">
 
 <h2>Frames</h2>
 {''.join(rows)}
@@ -480,8 +488,10 @@ def _write_chunks_html(
             f'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;">'
             f'  <div><div style="font-family:monospace;color:#888;">SOURCE</div>'
             f'       <video controls width="384" src="chunk_{i:02d}/source_segment.mp4"></video></div>'
-            f'  <div><div style="font-family:monospace;color:#888;">WHAT GEMMA SEES ({result.frames}×1s)</div>'
-            f'       <video controls width="384" src="chunk_{i:02d}/gemma_view.mp4"></video></div>'
+            f'  <div><div style="font-family:monospace;color:#888;">FRAMES PREVIEW ({result.frames}×1s)</div>'
+            f'       <video controls width="384" src="chunk_{i:02d}/frames_view.mp4"></video></div>'
+            f'  <div><div style="font-family:monospace;color:#888;">SPRITE</div>'
+            f'       <img src="chunk_{i:02d}/sprite.jpg" style="height:216px;border:1px solid #444;"></div>'
             f'  <div style="font-family:monospace;font-size:12px;color:#aaa;">'
             f'    <a href="chunk_{i:02d}/preview.html" style="color:{color};">chunk preview ▸</a><br>'
             f'    <a href="chunk_{i:02d}/prompt.txt" style="color:#888;">prompt.txt</a><br>'

@@ -266,7 +266,7 @@ def test_integration_pipeline_with_mocked_analyzer(tmp_path: Path):
         timestamps_file=None,
         interval=20.0,
         game_profile="gta",
-        analyzer="gemma",
+        analyzer="frames",
         llm="gemma4",
         base_url="http://localhost:11434/v1",
         api_key=None,
@@ -293,7 +293,7 @@ def test_integration_pipeline_with_mocked_analyzer(tmp_path: Path):
             audio_cues=["engine"],
         ),
     ])
-    with patch("supaclip.extract.backends.gemma.GemmaBackend.analyze_segment", return_value=fake):
+    with patch("supaclip.extract.backends.frames.FramesBackend.analyze_segment", return_value=fake):
         manifests = run(cfg, Logger(verbose=False))
 
     assert len(manifests) == 1

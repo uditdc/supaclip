@@ -96,7 +96,8 @@ supaclip/
 │       ├── profiles.py      # game profiles (gta built-in)
 │       └── backends/
 │           ├── __init__.py
-│           └── gemma.py     # default analyzer backend
+│           ├── frames.py    # short-frame analyzer (OpenAI-compat sprite grid)
+│           └── video.py     # full-video analyzer (Google AI Studio)
 └── tests/
     └── test_core.py
 ```
@@ -143,7 +144,7 @@ Produces a list of candidate `(start, end)` time ranges. Four strategies, select
 
 For each deduplicated segment, an analyzer backend produces a description, categories, a base interest score, and game-specific structured signals.
 
-- **FR-4.1 Backend interface.** Define a backend interface (e.g. `analyze_segment(video, start, end, profile) -> SegmentAnalysis`). Selected by `--analyzer`; default `gemma`.
+- **FR-4.1 Backend interface.** Define a backend interface (e.g. `analyze_segment(video, start, end, profile) -> SegmentAnalysis`). Selected by `--analyzer`; default `video`.
 - **FR-4.2 Gemma backend.** Calls a vision-language model over an **OpenAI-compatible chat API** (default endpoint: Ollama at `http://localhost:11434/v1`; default model `gemma4`). The backend samples a handful of frames evenly across the segment, sends them as image content blocks, and requests **structured JSON** output. Output JSON must be defensively parsed (strip code fences, locate outermost braces) and validated with Pydantic; retry once on parse failure.
 - **FR-4.3 Description.** A concise prose description of what happens in the segment, written for an LLM reader (Claude). Grounded in the visible footage; no invented detail.
 - **FR-4.4 Categories.** Zero or more tags drawn from the active game profile's taxonomy (FR-4.7).
@@ -264,7 +265,7 @@ extract VIDEO [VIDEO ...] [options]
 | `--timestamps FILE` | — | `start,end` pairs file (required for `--segmenter manual`) |
 | `--interval SECONDS` | `60` | Window length for `interval` strategy |
 | `--game-profile NAME\|FILE` | `gta` | Built-in profile name or path to a profile JSON |
-| `--analyzer {gemma,gemma-video}` | `gemma` | Analyzer backend |
+| `--analyzer {video,frames}` | `video` | Analyzer backend (full-video via Google AI Studio, or short-frame sprite grid via any OpenAI-compatible endpoint) |
 | `--llm MODEL` | `gemma4` | Analyzer model id |
 | `--base-url URL` | `http://localhost:11434/v1` | OpenAI-compatible endpoint |
 | `--api-key KEY` | — | API key (unused for local Ollama) |
@@ -325,7 +326,8 @@ As in Section 6. Key responsibilities:
 - `extract/dedupe.py` — IoU computation + iterative merge.
 - `extract/profiles.py` — built-in `gta` profile + loader for custom profile files.
 - `extract/analyze.py` — backend interface + dispatch + scoring blend.
-- `extract/backends/gemma.py` — frame-sampling, OpenAI-compatible call, JSON parsing.
+- `extract/backends/frames.py` — frame-sampling into a sprite grid, OpenAI-compatible call, JSON parsing.
+- `extract/backends/video.py` — full-video upload to Google AI Studio.
 - `extract/pipeline.py` — orchestrates ingest → segment → dedupe → analyze → catalog.
 - `extract/cli.py` — argparse, builds config, invokes pipeline, exit codes.
 
@@ -387,7 +389,7 @@ As in Section 6. Key responsibilities:
 4. `extract/audio.py` — loudness curve + peak detection (unit-test on synthetic data).
 5. `extract/segment.py` — the four strategies (use audio peaks in `auto`).
 6. `extract/dedupe.py` — IoU + merge (unit-tested).
-7. `extract/analyze.py` + `extract/backends/gemma.py`.
+7. `extract/analyze.py` + `extract/backends/frames.py` + `extract/backends/video.py`.
 8. `extract/pipeline.py` — wire the five stages.
 9. `extract/cli.py` — argparse, config, exit codes.
 10. `pyproject.toml`, `README.md`, `.env.example`; finalize tests; verify all acceptance criteria.
@@ -396,7 +398,7 @@ As in Section 6. Key responsibilities:
 
 ## 19. Assumptions & Open Items
 
-- **A-1.** The Gemma backend sends sampled frames as images over the OpenAI-compatible API. If the target Gemma deployment accepts native video, that can be added inside `backends/gemma.py` without changing the analyzer interface.
+- **A-1.** Two analyzer backends share one interface: `frames` sends sampled frames as a single sprite-grid image over the OpenAI-compatible API (model-agnostic), and `video` sends the native segment video to Google AI Studio. New transports can be added behind the same `analyze_segment` interface.
 - **A-2.** Frame sampling rates (whole-video boundary pass vs. per-segment analysis) start at sensible defaults and may be tuned during implementation; expose them as constants.
 - **A-3.** Semantic dedupe (FR-3.5) is optional; ship temporal dedupe first.
 - **A-4.** Phase 2 ("Stitch": Claude-directed assembly via an MCP server and an EDL) consumes this manifest but is not part of this PRD.

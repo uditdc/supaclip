@@ -372,10 +372,10 @@ def _is_inside(path: Path, base: Path) -> bool:
 def _build_agg_config(cfg: ExtractConfig) -> AggregateConfig:
     """Pick the right transport for the aggregator based on the analyzer.
 
-    gemma → OpenAI-compatible (same endpoint as the vision call).
-    gemma-video → Google AI Studio (same key the analyzer is already using).
+    frames → OpenAI-compatible (same endpoint as the vision call).
+    video → Google AI Studio (same key the analyzer is already using).
     """
-    if cfg.analyzer == "gemma-video":
+    if cfg.analyzer == "video":
         import os
         key = (
             os.environ.get("GEMINI_API_KEY")

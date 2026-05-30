@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from supaclip.extract.backends import gemma_video as gv
+from supaclip.extract.backends import video as gv
 from supaclip.extract.profiles import GTA_PROFILE
 
 
@@ -42,7 +42,7 @@ def test_analyze_segment_merges_events_across_chunks_with_offset(monkeypatch):
         '{"events":[{"start":10.0,"end":25.0,"description":"chunk2-a","categories":["mission"],"base_interest":30}]}',
     ])
 
-    backend = gv.GemmaVideoBackend(model="m", base_url="http://x", api_key="test-key")
+    backend = gv.VideoBackend(model="m", base_url="http://x", api_key="test-key")
     monkeypatch.setattr(backend, "_call", lambda *a, **kw: next(chunk_payloads))
 
     analysis = backend.analyze_segment("/x/video.mp4", 0.0, 180.0, GTA_PROFILE)
@@ -58,7 +58,7 @@ def test_analyze_segment_falls_back_when_chunk_returns_unparseable_json(monkeypa
     monkeypatch.setattr(gv, "_encode_chunk", lambda *a, **kw: b"\x00")
     monkeypatch.setattr(gv, "CHUNK_SECONDS", 60.0)
 
-    backend = gv.GemmaVideoBackend(model="m", base_url="http://x", api_key="test-key")
+    backend = gv.VideoBackend(model="m", base_url="http://x", api_key="test-key")
     monkeypatch.setattr(backend, "_call", lambda *a, **kw: "not json at all")
 
     analysis = backend.analyze_segment("/x/video.mp4", 0.0, 30.0, GTA_PROFILE)
@@ -67,7 +67,7 @@ def test_analyze_segment_falls_back_when_chunk_returns_unparseable_json(monkeypa
 
 
 def test_analyze_segment_empty_range_returns_no_events():
-    backend = gv.GemmaVideoBackend(model="m", base_url="http://x", api_key="test-key")
+    backend = gv.VideoBackend(model="m", base_url="http://x", api_key="test-key")
     analysis = backend.analyze_segment("/x/video.mp4", 0.0, 0.0, GTA_PROFILE)
     assert analysis.events == []
 
@@ -84,10 +84,10 @@ def test_constructor_requires_api_key(monkeypatch):
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_AI_STUDIO_API_KEY", raising=False)
     with pytest.raises(ValueError, match="GEMINI_API_KEY"):
-        gv.GemmaVideoBackend(model="m", base_url="http://x", api_key=None)
+        gv.VideoBackend(model="m", base_url="http://x", api_key=None)
 
 
 def test_constructor_picks_up_gemini_api_key_env(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "from-env")
-    backend = gv.GemmaVideoBackend(model="m", base_url="http://x", api_key=None)
+    backend = gv.VideoBackend(model="m", base_url="http://x", api_key=None)
     assert backend.api_key == "from-env"

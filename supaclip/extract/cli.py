@@ -46,9 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--context-file", default=None,
         help='JSON file with {"intro": "...", "characters": [{"name", "image", "description"}]}',
     )
-    p.add_argument("--analyzer", choices=("gemma", "gemma-video"), default="gemma-video",
-                   help="default: gemma-video (Google AI Studio, requires GEMINI_API_KEY); "
-                        "use `gemma` for the OpenAI-compatible frames fallback")
+    p.add_argument("--analyzer", choices=("video", "frames"), default="frames",
+                   help="default: frames (short-frame analysis — a model-agnostic "
+                        "sprite grid sent to any OpenAI-compatible endpoint); use "
+                        "`video` for full-video analysis via Google AI Studio "
+                        "(requires GEMINI_API_KEY)")
     p.add_argument("--llm", default=None, help="analyzer model id (default: env LLM_MODEL or gemma4)")
     p.add_argument("--base-url", default=None, help="OpenAI-compatible endpoint")
     p.add_argument("--api-key", default=None, help="API key (unused for local Ollama)")

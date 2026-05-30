@@ -50,10 +50,10 @@ def build_backend(
     base_url: str,
     api_key: str | None,
 ) -> AnalyzerBackend:
-    if name == "gemma":
-        from .backends.gemma import GemmaBackend
-        return GemmaBackend(model=model, base_url=base_url, api_key=api_key)
-    if name == "gemma-video":
-        from .backends.gemma_video import GemmaVideoBackend
-        return GemmaVideoBackend(model=model, base_url=base_url, api_key=api_key)
+    if name == "frames":
+        from .backends.frames import FramesBackend
+        return FramesBackend(model=model, base_url=base_url, api_key=api_key)
+    if name == "video":
+        from .backends.video import VideoBackend
+        return VideoBackend(model=model, base_url=base_url, api_key=api_key)
     raise ValueError(f"unknown analyzer backend: {name!r}")

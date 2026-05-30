@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="supaclip debug-prompt",
         description=(
-            "Dump what the gemma analyzer would send for a segment. By default "
+            "Dump what the frames analyzer would send for a segment. By default "
             "the segment is split into audio-aware chunks and each chunk gets its "
             "own debug folder + preview video. Use --dry-chunk to inspect only the "
             "chunk plan (no model artifacts), or --no-chunk to force a single chunk."
@@ -43,8 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--end", required=True, help="segment end (SS, MM:SS, or HH:MM:SS)")
     p.add_argument("-o", "--output", default="debug", help="output directory (default: debug/)")
     p.add_argument("--profile", default="gta", help="game profile name or path")
-    p.add_argument("--analyzer", choices=("gemma",), default="gemma",
-                   help="only `gemma` supports the prepare/send split today")
+    p.add_argument("--analyzer", choices=("frames",), default="frames",
+                   help="only `frames` supports the prepare/send split today")
     p.add_argument("--llm", default=None)
     p.add_argument("--base-url", default=None)
     p.add_argument("--api-key", default=None)
@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("--end must be greater than --start\n")
         return 2
 
-    from .backends.gemma import GemmaBackend
+    from .backends.frames import FramesBackend
     from .debug import write_chunked_debug_dump
     from .dry_chunk import run_dry_chunk
     from .profiles import load_profile
@@ -103,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     llm = args.llm or _env("LLM_MODEL", default="gemma4")
 
     profile = load_profile(args.profile)
-    backend = GemmaBackend(model=llm, base_url=base_url, api_key=api_key)
+    backend = FramesBackend(model=llm, base_url=base_url, api_key=api_key)
 
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import math
 import mimetypes
 import shutil
 import subprocess
@@ -17,6 +18,8 @@ from ._shared import _coerce, _context_block, _parse_json, _signals_block, _taxo
 FRAMES_FLOOR = 6
 SECONDS_PER_FRAME = 1.0
 TILE_PX = 512
+GRID_MAX_FRAMES = 16
+SPRITE_PADDING = 6
 
 
 @dataclass
@@ -43,16 +46,43 @@ class PreparedRequest:
     source_path: str = ""
     workdir: Path | None = None
     context: VideoContext | None = None
+    sprite_path: Path | None = None
+    sprite_jpeg: bytes | None = None
+    grid: tuple[int, int] = (0, 0)
 
     def cleanup(self) -> None:
         if self.workdir and self.workdir.exists():
             shutil.rmtree(self.workdir, ignore_errors=True)
 
+    def sprite_bytes(self) -> bytes | None:
+        if self.sprite_jpeg is not None:
+            return self.sprite_jpeg
+        if self.sprite_path is not None and self.sprite_path.exists():
+            return self.sprite_path.read_bytes()
+        return None
 
-class GemmaBackend:
-    name = "gemma"
+
+class FramesBackend:
+    """Short-frame analysis: samples a few frames into one sprite grid.
+
+    Model-agnostic — talks to any OpenAI-compatible chat endpoint, sending a
+    single contact-sheet image (cheap, one vision payload) instead of the whole
+    video. Because the transport is OpenAI-compatible, it validates an endpoint
+    and model id at construction time rather than a provider-specific key.
+    """
+
+    name = "frames"
 
     def __init__(self, model: str, base_url: str, api_key: str | None) -> None:
+        if not model or not str(model).strip():
+            raise ValueError(
+                "the 'frames' analyzer requires a model id; pass --llm or set LLM_MODEL."
+            )
+        if not base_url or not str(base_url).strip():
+            raise ValueError(
+                "the 'frames' analyzer needs an OpenAI-compatible endpoint; pass "
+                "--base-url or set LLM_BASE_URL/OPENAI_BASE_URL."
+            )
         self.model = model
         self.base_url = base_url
         self.api_key = api_key or "ollama"
@@ -72,14 +102,16 @@ class GemmaBackend:
     ) -> PreparedRequest:
         duration = max(0.0, end - start)
         owns_workdir = workdir is None
-        workdir = workdir or Path(tempfile.mkdtemp(prefix="supaclip-gemma-"))
+        workdir = workdir or Path(tempfile.mkdtemp(prefix="supaclip-frames-"))
         workdir.mkdir(parents=True, exist_ok=True)
 
         count = _frame_count_for(duration)
         ffmpeg_cmd, frames = _extract_frames(
             video_path, start, duration, workdir, count,
         )
-        prompt = _build_prompt(profile, duration, len(frames), context)
+        cols, rows = _grid_dims(len(frames))
+        sprite_path = _compose_sprite(frames, workdir, cols, rows)
+        prompt = _build_prompt(profile, duration, len(frames), cols, rows, context)
 
         return PreparedRequest(
             backend=self.name,
@@ -94,28 +126,30 @@ class GemmaBackend:
                 "frames_floor": FRAMES_FLOOR,
                 "seconds_per_frame": SECONDS_PER_FRAME,
                 "tile_px": TILE_PX,
+                "grid_max_frames": GRID_MAX_FRAMES,
+                "grid": [cols, rows],
             },
             ffmpeg_command=ffmpeg_cmd,
             source_path=str(video_path),
             workdir=workdir if owns_workdir else None,
             context=context,
+            sprite_path=sprite_path,
+            grid=(cols, rows),
         )
 
     def send(self, prepared: PreparedRequest) -> str:
-        if not prepared.frames:
+        sprite = prepared.sprite_bytes()
+        if not prepared.frames or sprite is None:
             return ""
 
         content: list[dict[str, Any]] = [{"type": "text", "text": prepared.prompt}]
         for part in _character_content_parts(prepared.context):
             content.append(part)
-        for f in prepared.frames:
-            content.append({"type": "text", "text": f"t={f.t_rel:.1f}s"})
-            data = f.main_jpeg if f.main_jpeg is not None else f.main_path.read_bytes()
-            b64 = base64.b64encode(data).decode("ascii")
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-            })
+        b64 = base64.b64encode(sprite).decode("ascii")
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+        })
 
         client = self._client()
         resp = client.chat.completions.create(
@@ -188,7 +222,43 @@ def _frame_count_for(duration: float) -> int:
     if duration <= 0:
         return 0
     target = int(duration // SECONDS_PER_FRAME)
-    return max(FRAMES_FLOOR, target)
+    return min(GRID_MAX_FRAMES, max(FRAMES_FLOOR, target))
+
+
+def _grid_dims(count: int) -> tuple[int, int]:
+    """Near-square sprite layout (cols, rows) holding all `count` frames."""
+    if count <= 0:
+        return (0, 0)
+    cols = math.ceil(math.sqrt(count))
+    rows = math.ceil(count / cols)
+    return (cols, rows)
+
+
+def _compose_sprite(
+    frames: list[FrameRecord],
+    workdir: Path,
+    cols: int,
+    rows: int,
+) -> Path | None:
+    """Tile the extracted per-frame tiles into a single contact-sheet JPEG.
+
+    Frames are laid out in reading order (left-to-right, top-to-bottom) so the
+    cell sequence matches temporal order; each cell keeps the timecode burned in
+    by `_extract_frames`."""
+    if not frames or cols <= 0 or rows <= 0:
+        return None
+    sprite_path = workdir / "sprite.jpg"
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-nostats", "-loglevel", "error",
+        "-start_number", "1",
+        "-i", str(workdir / "f_%04d.jpg"),
+        "-vf", f"tile={cols}x{rows}:padding={SPRITE_PADDING}:margin={SPRITE_PADDING}:color=black",
+        "-frames:v", "1",
+        "-q:v", "4",
+        str(sprite_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+    return sprite_path if sprite_path.exists() else None
 
 
 def _extract_frames(
@@ -240,12 +310,16 @@ def _build_prompt(
     profile: GameProfile,
     duration: float,
     frame_count: int,
+    cols: int,
+    rows: int,
     context: VideoContext | None = None,
 ) -> str:
     if profile.prompt_template_frames:
         return profile.prompt_template_frames.format(
             duration=duration,
             frame_count=frame_count,
+            cols=cols,
+            rows=rows,
             subject=profile.subject,
             hints=profile.prompt_hints,
             taxonomy=_taxonomy_str(profile),
@@ -260,29 +334,28 @@ def _build_prompt(
     example = (profile.example_json.strip() + "\n\n") if profile.example_json.strip() else ""
     return (
         f"{ctx}"
-        f"Analyze a {duration:.1f}-second {profile.subject} segment sampled as "
-        f"{frame_count} frames in temporal order. Each image is preceded by a text "
-        f"token of the form `t=12.5s` giving its segment-relative timestamp; the "
-        f"same value is also burned into the top-left corner of the image as a "
-        f"backup.\n"
+        f"You are given ONE image: a {cols}×{rows} contact sheet of {frame_count} "
+        f"frames sampled evenly from a {duration:.1f}-second {profile.subject} "
+        f"segment. Read the cells in reading order — left-to-right, then top-to-"
+        f"bottom — which is strict temporal order. Each cell has its timestamp "
+        f"burned into its top-left corner as `HH:MM:SS.mmm` relative to the start "
+        f"of the segment (the first cell is at 00:00:00).\n"
         f"{profile.prompt_hints}\n\n"
         f"Allowed category tags (subset only): {tax}\n\n"
         f"TASK: split the segment into a sequence of distinct situations.\n"
         f"{profile.effective_boundary_rules()}\n"
         f"Each situation is a contiguous time window [start, end] in seconds\n"
-        f"RELATIVE TO THE SEGMENT START (0.0 = first frame, {duration:.1f} = last\n"
-        f"frame). Windows MUST NOT overlap.\n\n"
+        f"RELATIVE TO THE SEGMENT START (0.0 = first cell, {duration:.1f} = last\n"
+        f"cell). Windows MUST NOT overlap.\n\n"
         f"BOUNDARY PRECISION (this is the most important part — get the times right):\n"
-        f"- Use the `t=X.Xs` text token preceding each frame to set start/end. The\n"
-        f"  burned-in timecode is a backup; the text token is authoritative.\n"
-        f"- An event's `start` MUST equal the timestamp of the FIRST frame in which\n"
-        f"  the new situation is visible. NOT one frame earlier, NOT one frame\n"
-        f"  later. If the change happens between two frames, use the LATER frame's\n"
-        f"  timestamp.\n"
-        f"- An event's `end` MUST equal the timestamp of the LAST frame in which\n"
-        f"  the situation is still visible. If the next sampled frame already shows\n"
-        f"  the new situation, set `end` to THIS frame's timestamp, not the next\n"
-        f"  one's.\n"
+        f"- Convert each cell's burned-in `HH:MM:SS.mmm` timecode to seconds and use\n"
+        f"  those values for start/end.\n"
+        f"- An event's `start` MUST equal the timestamp of the FIRST cell in which\n"
+        f"  the new situation is visible. NOT one cell earlier, NOT one cell later.\n"
+        f"  If the change happens between two cells, use the LATER cell's timestamp.\n"
+        f"- An event's `end` MUST equal the timestamp of the LAST cell in which\n"
+        f"  the situation is still visible. If the next cell already shows the new\n"
+        f"  situation, set `end` to THIS cell's timestamp, not the next one's.\n"
         f"- The first event's `start` is 0.0. The last event's `end` is {duration:.1f}\n"
         f"  unless you are intentionally leaving a trailing dull gap.\n"
         f"- Consecutive events should be tight: `events[i].end == events[i+1].start`\n"
