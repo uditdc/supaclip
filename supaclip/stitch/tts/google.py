@@ -12,7 +12,7 @@ from supaclip.core.ffmpeg import run_ffmpeg
 from supaclip.stitch.tts.base import Alignment, TTSBackend, Voice
 
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta"
-DEFAULT_MODEL = "gemini-2.5-flash-preview-tts"
+DEFAULT_MODEL = "gemini-3.1-flash-tts-preview"
 
 PCM_SAMPLE_RATE = 24000
 
@@ -45,6 +45,9 @@ class GoogleBackend(TTSBackend):
     through the script text itself (e.g. 'Say cheerfully: ...') rather than
     numeric settings. The API returns raw 24kHz mono PCM, converted to the same
     48kHz stereo wav the rest of the pipeline expects.
+
+    Gemini returns no timestamps, so captions are derived by local forced
+    alignment (the optional `align` extra); see supaclip.stitch.tts.align.
     """
 
     name = "google"
@@ -85,11 +88,12 @@ class GoogleBackend(TTSBackend):
         settings: dict[str, float],
         out_path: str | Path,
     ) -> tuple[Path, Alignment]:
-        raise GoogleTTSError(
-            "The google TTS backend does not provide per-character timestamps, "
-            "so captions are unavailable. Drop `captions` from the EDL or use the "
-            "elevenlabs backend for caption-synced voiceovers."
-        )
+        from supaclip.stitch.tts.align import align_text_to_audio
+
+        pcm_bytes = self._request_pcm(text, voice_id, settings)
+        out = self._pcm_to_wav(pcm_bytes, out_path)
+        alignment = align_text_to_audio(out, text)
+        return out, alignment
 
     def list_voices(self) -> list[Voice]:
         return [Voice(voice_id=name, name=name, description=desc)

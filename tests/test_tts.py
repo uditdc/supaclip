@@ -177,10 +177,28 @@ def test_google_synthesize_posts_and_writes_wav(tmp_path):
     assert "s16le" in ff_args and "24000" in ff_args
 
 
-def test_google_alignment_unsupported():
-    backend = GoogleBackend(api_key="k")
-    with pytest.raises(GoogleTTSError):
-        backend.synthesize_with_alignment("hi", "Kore", {}, "/tmp/x.wav")
+def test_google_synthesize_with_alignment(tmp_path, monkeypatch):
+    import supaclip.stitch.tts.align as align_mod
+    from supaclip.stitch.tts.base import Alignment
+
+    canned = Alignment(characters=list("hi"), start_times=[0.0, 0.1],
+                       end_times=[0.1, 0.2])
+    monkeypatch.setattr(align_mod, "align_text_to_audio", lambda wav, text: canned)
+
+    opener = _FakeOpener(_gemini_payload(b"\x00" * 256))
+    backend = GoogleBackend(api_key="k", opener=opener)
+    out_path = tmp_path / "voice.wav"
+
+    with patch("supaclip.stitch.tts.google.run_ffmpeg") as mock_ff:
+        def fake_ff(args):
+            Path(args[-1]).write_bytes(b"RIFFfake")
+            return ""
+        mock_ff.side_effect = fake_ff
+        out, alignment = backend.synthesize_with_alignment("hi", "Kore", {}, out_path)
+
+    assert out.exists()
+    assert alignment is canned
+    assert len(opener.calls) == 1
 
 
 def test_google_list_voices_returns_prebuilt():
