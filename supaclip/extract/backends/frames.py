@@ -159,6 +159,7 @@ class FramesBackend:
                 {"role": "user", "content": content},
             ],
             temperature=0.2,
+            extra_body={"reasoning": {"enabled": False}},
         )
         return resp.choices[0].message.content or ""
 

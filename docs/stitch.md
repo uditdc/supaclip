@@ -58,6 +58,13 @@ Rules:
   overlaps, covering exactly `[0, output.duration]`.
 - `audio` and `ost` may overlap. `audio[].kind` is `voiceover`, `clip_audio`,
   or `silence`.
+- `voiceover.backend` is `elevenlabs` (default) or `google` (Gemini / Google
+  AI Studio). For `google`, `voice_id` is a prebuilt voice name like `Kore` or
+  `Puck` (see `stitch voices --backend google`) and delivery style is steered
+  through the script text itself ("Say cheerfully: ...") rather than numeric
+  `settings`. Gemini returns audio only, so `captions`/`karaoke_fill` with the
+  `google` backend are timed by local forced alignment (`pip install
+  'supaclip[align]'`); `elevenlabs` provides timestamps natively.
 - `clip_id` is the integer catalog ID returned by `catalog_search` /
   `get_clip_preview`.
 - `source_in` is optional; default is `0.0` (start of the master clip).
@@ -103,9 +110,19 @@ Top-level optional fields:
   "max_words": 4,
   "max_chars": 28,
   "min_chunk_duration": 0.4,
-  "font_size": null                     // optional override (pixels)
+  "font_size": null,                    // optional override (pixels)
+  "highlight": "none",                  // none | karaoke_fill
+  "highlight_color": "#FFD600"          // fill color when highlight=karaoke_fill
 }
 ```
+
+When `highlight` is `karaoke_fill`, each phrase stays on screen while words
+fill with `highlight_color` one at a time as they're spoken (word timing comes
+from the same TTS alignment). `clean_white` + `karaoke_fill` gives the classic
+white→yellow sweep. `elevenlabs` returns timestamps natively; the `google`
+backend has none, so captions there are derived by **local forced alignment** —
+install the extra with `pip install 'supaclip[align]'` (first render downloads
+the MMS_FA model once; CPU is fine, a few seconds per clip, then cached).
 
 ### Speech-synced captions vs OST
 

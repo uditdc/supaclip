@@ -36,6 +36,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "build>=1.2"]
 mcp = ["mcp>=1.0"]
+align = ["torch>=2.1", "torchaudio>=2.1"]
 
 [project.scripts]
 extract = "supaclip.extract.cli:main"

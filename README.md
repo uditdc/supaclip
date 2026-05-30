@@ -124,7 +124,13 @@ stitch render   examples/edl-gta6-hair.json -o short.mp4
 ```
 
 ElevenLabs is the default TTS backend (`ELEVENLABS_API_KEY` in `.env`),
-mirroring the pluggable analyzer pattern from Extract.
+mirroring the pluggable analyzer pattern from Extract. Google AI Studio
+(Gemini) is also available — set `"backend": "google"` on the EDL voiceover
+and provide `GEMINI_API_KEY`. Pick a prebuilt voice (e.g. `Kore`, `Puck`)
+via `stitch voices --backend google`. Gemini returns audio only, so speech-synced
+`captions` there are timed by local forced alignment — install it with
+`pip install 'supaclip[align]'` (first render downloads the MMS_FA model once,
+then it's cached); `elevenlabs` returns timestamps natively.
 
 For the one-shot **script → EDL → validate → render** flow inside Claude
 Code, paste [`docs/claude-prompt.md`](docs/claude-prompt.md) into a session
