@@ -58,6 +58,12 @@ Rules:
   overlaps, covering exactly `[0, output.duration]`.
 - `audio` and `ost` may overlap. `audio[].kind` is `voiceover`, `clip_audio`,
   or `silence`.
+- `voiceover.backend` is `elevenlabs` (default) or `google` (Gemini / Google
+  AI Studio). For `google`, `voice_id` is a prebuilt voice name like `Kore` or
+  `Puck` (see `stitch voices --backend google`) and delivery style is steered
+  through the script text itself ("Say cheerfully: ...") rather than numeric
+  `settings`. The `google` backend returns audio only, so `captions` (which
+  need per-character timing) require the `elevenlabs` backend.
 - `clip_id` is the integer catalog ID returned by `catalog_search` /
   `get_clip_preview`.
 - `source_in` is optional; default is `0.0` (start of the master clip).

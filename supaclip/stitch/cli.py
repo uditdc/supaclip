@@ -2,17 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
-
-
-def _env(*names: str, default: str | None = None) -> str | None:
-    for n in names:
-        v = os.environ.get(n)
-        if v:
-            return v
-    return default
 
 
 def _load_dotenv_if_present() -> None:
@@ -42,7 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pr.add_argument("--no-cache", action="store_true")
     pr.add_argument("--fontfile", default=None, help="TTF/OTF font for OST overlays")
-    pr.add_argument("--api-key", default=None, help="TTS API key (default: env)")
+    pr.add_argument("--api-key", default=None,
+                    help="TTS API key (default: env, per the EDL's voiceover.backend)")
     pr.add_argument("-v", "--verbose", action="store_true")
     pr.add_argument("--json", dest="emit_json", action="store_true")
     pr.add_argument("--print-ffmpeg", dest="print_ffmpeg", action="store_true",
@@ -59,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     pp = sub.add_parser("voice-preview", help="synthesize a one-off TTS sample")
     pp.add_argument("--text", required=True)
     pp.add_argument("--voice-id", required=True)
+    pp.add_argument("--backend", default="elevenlabs", choices=["elevenlabs", "google"])
     pp.add_argument("--stability", type=float, default=50.0)
     pp.add_argument("--similarity", type=float, default=75.0)
     pp.add_argument("--style", type=float, default=0.0)
@@ -68,7 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--no-cache", action="store_true")
     pp.add_argument("-o", "--output", default="preview.wav")
 
-    pl = sub.add_parser("voices", help="list available ElevenLabs voices")
+    pl = sub.add_parser("voices", help="list available TTS voices")
+    pl.add_argument("--backend", default="elevenlabs", choices=["elevenlabs", "google"])
     pl.add_argument("--api-key", default=None)
     pl.add_argument("--json", dest="emit_json", action="store_true")
 
@@ -107,7 +101,7 @@ def _cmd_render(args) -> int:
         return 2
 
     output = args.output or str(edl_path.with_suffix(".mp4"))
-    api_key = args.api_key or _env("ELEVENLABS_API_KEY")
+    api_key = args.api_key
 
     cfg = RenderConfig(
         edl_path=str(edl_path),
@@ -183,12 +177,12 @@ def _cmd_voice_preview(args) -> int:
     from supaclip.stitch.tts.cache import TTSCache
 
     log = Logger()
-    api_key = args.api_key or _env("ELEVENLABS_API_KEY")
+    api_key = args.api_key
     settings = {"stability": args.stability,
                 "similarity": args.similarity,
                 "style": args.style}
     cache = TTSCache(args.cache_dir, enabled=not args.no_cache)
-    key = TTSCache.key("elevenlabs", args.voice_id, settings, args.text)
+    key = TTSCache.key(args.backend, args.voice_id, settings, args.text)
     cached = cache.get(key)
     if cached is not None:
         log.success(f"cache hit: {cached}")
@@ -198,7 +192,7 @@ def _cmd_voice_preview(args) -> int:
         log.success(f"wrote {args.output}")
         return 0
 
-    backend = get_backend("elevenlabs", api_key=api_key)
+    backend = get_backend(args.backend, api_key=api_key)
     try:
         backend.synthesize(args.text, args.voice_id, settings, args.output)
     except Exception as e:  # noqa: BLE001
@@ -214,8 +208,8 @@ def _cmd_voices(args) -> int:
     from supaclip.stitch.tts import get_backend
 
     log = Logger()
-    api_key = args.api_key or _env("ELEVENLABS_API_KEY")
-    backend = get_backend("elevenlabs", api_key=api_key)
+    api_key = args.api_key
+    backend = get_backend(args.backend, api_key=api_key)
     try:
         voices = backend.list_voices()
     except Exception as e:  # noqa: BLE001

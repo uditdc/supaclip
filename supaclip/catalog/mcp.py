@@ -181,9 +181,11 @@ def _build_server():
         `output_path` is omitted, the mp4 is written to a tempfile and the
         path is returned. A sidecar `<output>.edl.json` is always written.
 
-        Requires `ELEVENLABS_API_KEY` in the MCP server's environment if the
-        EDL contains a voiceover. May spend TTS credits on each call unless
-        the same (text + voice + settings) tuple is already cached.
+        Requires a TTS API key in the MCP server's environment if the EDL
+        contains a voiceover: `ELEVENLABS_API_KEY` for the default `elevenlabs`
+        backend, or `GEMINI_API_KEY` for the `google` backend. May spend TTS
+        credits on each call unless the same (text + voice + settings) tuple is
+        already cached.
         """
         import json as _json
         import tempfile
