@@ -13,6 +13,7 @@ ReframeMode = Literal["crop_center", "crop_left", "crop_right", "letterbox"]
 AudioKind = Literal["voiceover", "clip_audio", "silence"]
 OSTStyle = Literal["dark", "light", "yellow_punch", "red_alert", "pink_reveal"]
 OSTPosition = Literal["top", "middle", "bottom"]
+WatermarkPosition = Literal["top", "middle", "bottom"]
 CaptionStyleName = Literal["clean_white", "boxed_dark", "karaoke_yellow"]
 CaptionPosition = Literal["top", "middle", "bottom", "lower_third"]
 TTSBackendName = Literal["elevenlabs"]
@@ -21,12 +22,27 @@ TransitionKind = Literal["cut", "crossfade"]
 AnnotationShape = Literal["circle", "box", "arrow"]
 
 
+class EDLWatermark(BaseModel):
+    """A static brand mark burned across the full output in the render pass.
+
+    Distinct from `ost`: OST is timed emphasis text with a styled background
+    box; a watermark is a single subtle semi-transparent line shown for the
+    whole video, composited in the same encode as everything else.
+    """
+    model_config = ConfigDict(extra="forbid")
+    text: str
+    opacity: float = 0.5
+    font_size: int = 36
+    position: WatermarkPosition = "bottom"
+
+
 class EDLOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     width: int = 1080
     height: int = 1920
     fps: int = 60
     duration: float
+    watermark: EDLWatermark | None = None
 
 
 class EDLVoiceover(BaseModel):
@@ -167,6 +183,19 @@ def validate_edl(edl: EDL, resolver: ClipResolver | None = None) -> list[Validat
         issues.append(ValidationIssue("error", "output", "width/height must be > 0"))
     if out.fps <= 0:
         issues.append(ValidationIssue("error", "output.fps", "must be > 0"))
+    if out.watermark is not None:
+        if not (0.0 <= out.watermark.opacity <= 1.0):
+            issues.append(ValidationIssue(
+                "error", "output.watermark.opacity", "must be in [0.0, 1.0]",
+            ))
+        if out.watermark.font_size <= 0:
+            issues.append(ValidationIssue(
+                "error", "output.watermark.font_size", "must be > 0",
+            ))
+        if not out.watermark.text.strip():
+            issues.append(ValidationIssue(
+                "error", "output.watermark.text", "must not be empty",
+            ))
 
     for i, cue in enumerate(edl.video):
         _check_range(issues, f"video[{i}]", cue.start, cue.end, out.duration)

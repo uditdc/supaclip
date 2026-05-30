@@ -13,7 +13,7 @@ from supaclip.core.log import Logger
 from supaclip.stitch.assembly import CueInput, RenderInputs, build_command
 from supaclip.stitch.captions import chunk_alignment, render_caption_pngs
 from supaclip.stitch.music import build_music_plan, resolve_music_file
-from supaclip.stitch.overlay import render_ost_pngs
+from supaclip.stitch.overlay import render_ost_pngs, render_watermark_png
 from supaclip.stitch.tts import get_backend
 from supaclip.stitch.tts.base import Alignment
 from supaclip.stitch.tts.cache import TTSCache
@@ -124,6 +124,19 @@ def render(
         )
         log.info(f"rendered {len(ost_renders)} OST png(s) -> {ost_cache}")
 
+    watermark_render = None
+    if edl.output.watermark is not None:
+        log.stage("render watermark")
+        watermark_cache = Path(config.cache_dir).expanduser() / "watermark"
+        watermark_render = render_watermark_png(
+            edl.output.watermark,
+            out_w=edl.output.width,
+            out_h=edl.output.height,
+            cache_dir=watermark_cache,
+            fontfile=config.fontfile,
+        )
+        log.info(f"rendered watermark png -> {watermark_render.png_path}")
+
     caption_renders = []
     if edl.captions is not None and alignment is not None:
         log.stage("render speech captions")
@@ -159,6 +172,7 @@ def render(
         music_plan=music_plan,
         ost_renders=ost_renders,
         caption_renders=caption_renders,
+        watermark_render=watermark_render,
         preset=config.preset,
         crf=config.crf,
     )

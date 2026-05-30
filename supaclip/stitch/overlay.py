@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from supaclip.core.edl import EDLOSTCue, OSTPosition, OSTStyle
+from supaclip.core.edl import EDLOSTCue, EDLWatermark, OSTPosition, OSTStyle, WatermarkPosition
 
 
 RGBA = tuple[int, int, int, int]
@@ -95,6 +95,9 @@ POSITION_Y_FRACTION: dict[OSTPosition, float] = {
     "middle": 0.50,
     "bottom": 0.78,
 }
+
+
+WATERMARK_MARGIN_FRACTION = 0.021
 
 
 DEFAULT_FONT_CANDIDATES: tuple[str, ...] = (
@@ -295,3 +298,87 @@ def build_ost_overlay_chain(
         )
         cur = out_label
     return chains
+
+
+@dataclass(frozen=True)
+class WatermarkRender:
+    """A rendered watermark PNG ready to be overlaid for the whole output."""
+    png_path: Path
+    x: int
+    y: int
+
+
+def _watermark_png_filename(wm: EDLWatermark, out_w: int, out_h: int) -> str:
+    key = f"{wm.text}|{wm.opacity}|{wm.font_size}|{wm.position}|{out_w}x{out_h}"
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+    return f"watermark-{digest}.png"
+
+
+def render_watermark_png(
+    wm: EDLWatermark,
+    out_w: int,
+    out_h: int,
+    cache_dir: Path,
+    fontfile: str | None = None,
+) -> WatermarkRender:
+    """Render a subtle, box-free semi-transparent watermark line to a PNG.
+
+    Unlike OST cues, there is no background box: the text alone is drawn at the
+    configured opacity with a faint stroke so it stays legible over any footage.
+    """
+    font_path = _resolve_font(fontfile)
+    font = ImageFont.truetype(font_path, wm.font_size)
+
+    alpha = int(round(max(0.0, min(1.0, wm.opacity)) * 255))
+    stroke_width = max(1, wm.font_size // 24)
+    stroke_alpha = int(round(alpha * 0.6))
+
+    ascent, descent = font.getmetrics()
+    text_w = int(font.getlength(wm.text))
+    text_h = ascent + descent
+    pad = stroke_width + 2
+    png_w = text_w + 2 * pad
+    png_h = text_h + 2 * pad
+
+    img = Image.new("RGBA", (png_w, png_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.text(
+        (pad, pad),
+        wm.text,
+        font=font,
+        fill=(255, 255, 255, alpha),
+        stroke_width=stroke_width,
+        stroke_fill=(0, 0, 0, stroke_alpha),
+    )
+
+    dest = cache_dir / _watermark_png_filename(wm, out_w, out_h)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    img.save(dest, format="PNG")
+
+    x = (out_w - png_w) // 2
+    margin = int(out_h * WATERMARK_MARGIN_FRACTION)
+    if wm.position == "top":
+        y = margin
+    elif wm.position == "middle":
+        y = (out_h - png_h) // 2
+    else:
+        y = out_h - png_h - margin
+    y = max(0, min(y, out_h - png_h))
+
+    return WatermarkRender(png_path=dest, x=x, y=y)
+
+
+def build_watermark_overlay_chain(
+    render: WatermarkRender | None,
+    input_index: int | None,
+    base_label: str,
+    final_label: str,
+) -> list[str]:
+    """Overlay the watermark across the entire output (no enable window)."""
+    if render is None or input_index is None:
+        return [f"{base_label}null{final_label}"]
+    return [
+        f"{base_label}[{input_index}:v]"
+        f"overlay=x={render.x}:y={render.y}:format=auto"
+        f"{final_label}"
+    ]

@@ -8,7 +8,12 @@ from supaclip.stitch.annotation import build_annotation_chain
 from supaclip.stitch.captions import CaptionRender, build_caption_overlay_chain
 from supaclip.stitch.effects import plan_effect
 from supaclip.stitch.music import MusicPlan
-from supaclip.stitch.overlay import OSTRender, build_ost_overlay_chain
+from supaclip.stitch.overlay import (
+    OSTRender,
+    WatermarkRender,
+    build_ost_overlay_chain,
+    build_watermark_overlay_chain,
+)
 from supaclip.stitch.reframe import build_reframe_filter
 from supaclip.stitch.transitions import build_join_chain, needs_xfade_chain
 
@@ -36,6 +41,7 @@ class RenderInputs:
     music_plan: MusicPlan | None = None
     ost_renders: list[OSTRender] = field(default_factory=list)
     caption_renders: list[CaptionRender] = field(default_factory=list)
+    watermark_render: WatermarkRender | None = None
     video_bitrate: str = "8M"
     audio_bitrate: str = "192k"
     preset: str = "medium"
@@ -90,6 +96,12 @@ def build_command(inputs: RenderInputs, output_path: str | Path) -> list[str]:
         args += ["-i", str(render.png_path)]
         next_index += 1
 
+    watermark_input_index: int | None = None
+    if inputs.watermark_render is not None:
+        watermark_input_index = next_index
+        args += ["-i", str(inputs.watermark_render.png_path)]
+        next_index += 1
+
     chains: list[str] = []
     video_labels: list[str] = []
     for i, cue_input in enumerate(inputs.cues):
@@ -115,20 +127,36 @@ def build_command(inputs: RenderInputs, output_path: str | Path) -> list[str]:
     if ann_chain:
         chains.append(f"{vjoined}{ann_chain}{after_ann_label}")
 
+    watermark_present = inputs.watermark_render is not None
     captions_present = bool(inputs.caption_renders)
-    ost_final_label = "[vost_out]" if captions_present else "[vout]"
+    video_final_label = "[vout]"
+
+    ost_final_label = "[vost_out]" if (captions_present or watermark_present) else video_final_label
     chains.extend(build_ost_overlay_chain(
         renders=inputs.ost_renders,
         input_indices=ost_input_indices,
         base_label=after_ann_label,
         final_label=ost_final_label,
     ))
+
+    caption_final_label = "[vcap_out]" if watermark_present else video_final_label
     if captions_present:
         chains.extend(build_caption_overlay_chain(
             renders=inputs.caption_renders,
             input_indices=caption_input_indices,
             base_label=ost_final_label,
-            final_label="[vout]",
+            final_label=caption_final_label,
+        ))
+        watermark_base_label = caption_final_label
+    else:
+        watermark_base_label = ost_final_label
+
+    if watermark_present:
+        chains.extend(build_watermark_overlay_chain(
+            render=inputs.watermark_render,
+            input_index=watermark_input_index,
+            base_label=watermark_base_label,
+            final_label=video_final_label,
         ))
 
     audio_labels: list[str] = []
