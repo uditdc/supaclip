@@ -213,12 +213,18 @@ that). It does include the rule "do not stop or ask between steps".
 
 ---
 
+## Done since Phase 2.5
+
+- Hardware encoding (`--encoder`: nvenc / videotoolbox / qsv, auto-probed) and
+  resolution scaling (`--resolution 720p…4k`). See `stitch/encode.py`.
+- True circle annotation outline (PIL ring overlay, not a bounding box).
+- `reframe_offset` applied as a horizontal crop pan.
+
 ## Open items / deferred to 3.x
 
 - Smart reframe (face/motion-tracked crop window).
 - Multi-aspect sibling exports (9:16 + 1:1 + 16:9 from one EDL).
 - Caption auto-generation from voiceover script (burned-in or .srt).
-- Hardware encoding presets (`h264_nvenc`, `videotoolbox`).
 - Direct social upload (YouTube/TikTok/Reels).
 - Vector/semantic catalog search.
 - Script generation from a topic (`stitch script --topic …`).

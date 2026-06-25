@@ -108,14 +108,40 @@ def test_join_chain_mixed_cut_and_xfade():
 
 # ---- annotations ----
 
-def test_annotation_circle_emits_drawbox():
+def test_annotation_circle_not_handled_by_drawbox():
     ann = EDLAnnotation(start=1.0, end=3.0, shape="circle", x=540, y=700, radius=180)
-    out = build_annotation(ann)
-    assert "drawbox=" in out
-    assert "x=360" in out
-    assert "y=520" in out
-    assert "w=360:h=360" in out
-    assert "enable='between(t,1.000,3.000)'" in out
+    with pytest.raises(ValueError):
+        build_annotation(ann)
+
+
+def test_annotation_chain_skips_circles():
+    anns = [
+        EDLAnnotation(start=0, end=1, shape="circle", x=540, y=700, radius=180),
+        EDLAnnotation(start=0, end=1, shape="box", x=100, y=100, width=50, height=50),
+    ]
+    chain = build_annotation_chain(anns)
+    assert chain.count("drawbox=") == 1
+
+
+def test_render_circle_png_produces_ring(tmp_path):
+    from supaclip.stitch.annotation import render_annotation_pngs
+
+    anns = [EDLAnnotation(start=0.5, end=1.8, shape="circle", x=540, y=700,
+                          radius=180, stroke_width=8)]
+    [r] = render_annotation_pngs(anns, tmp_path)
+    assert r.png_path.exists()
+    # png is 2*radius + 2*(stroke+2) = 380px; placed centered on (x, y)
+    assert r.x == 540 - 190
+    assert r.y == 700 - 190
+    assert r.start == 0.5 and r.end == 1.8
+
+
+def test_render_annotation_pngs_ignores_non_circles(tmp_path):
+    from supaclip.stitch.annotation import render_annotation_pngs
+
+    anns = [EDLAnnotation(start=0, end=1, shape="box", x=100, y=100,
+                          width=50, height=50)]
+    assert render_annotation_pngs(anns, tmp_path) == []
 
 
 def test_annotation_box_centered_origin():

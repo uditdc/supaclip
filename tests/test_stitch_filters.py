@@ -45,6 +45,21 @@ def test_reframe_custom_dimensions():
     assert "fps=30" in f
 
 
+def test_reframe_zero_offset_unchanged():
+    assert build_reframe_filter("crop_center", offset=0) == build_reframe_filter("crop_center")
+
+
+def test_reframe_offset_pans_and_clamps():
+    f = build_reframe_filter("crop_center", offset=120)
+    assert "clip((in_w-out_w)/2+(120)\\,0\\,in_w-out_w)" in f
+    neg = build_reframe_filter("crop_left", offset=-40)
+    assert "clip(0+(-40)\\,0\\,in_w-out_w)" in neg
+
+
+def test_reframe_offset_ignored_for_letterbox():
+    assert build_reframe_filter("letterbox", offset=200) == build_reframe_filter("letterbox")
+
+
 def test_all_styles_have_presets():
     for style in ("dark", "light", "yellow_punch", "red_alert", "pink_reveal"):
         assert style in STYLE_PRESETS

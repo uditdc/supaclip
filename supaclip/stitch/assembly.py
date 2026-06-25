@@ -4,9 +4,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from supaclip.core.edl import EDL, EDLVideoCue, ReframeMode
-from supaclip.stitch.annotation import build_annotation_chain
+from supaclip.stitch.annotation import (
+    AnnotationRender,
+    build_annotation_chain,
+    build_annotation_overlay_chain,
+)
 from supaclip.stitch.captions import CaptionRender, build_caption_overlay_chain
 from supaclip.stitch.effects import plan_effect
+from supaclip.stitch.encode import build_video_encode_args
 from supaclip.stitch.music import MusicPlan
 from supaclip.stitch.overlay import (
     OSTRender,
@@ -41,9 +46,11 @@ class RenderInputs:
     music_plan: MusicPlan | None = None
     ost_renders: list[OSTRender] = field(default_factory=list)
     caption_renders: list[CaptionRender] = field(default_factory=list)
+    annotation_renders: list[AnnotationRender] = field(default_factory=list)
     watermark_render: WatermarkRender | None = None
     video_bitrate: str = "8M"
     audio_bitrate: str = "192k"
+    encoder: str = "libx264"
     preset: str = "medium"
     crf: int = 20
 
@@ -102,10 +109,18 @@ def build_command(inputs: RenderInputs, output_path: str | Path) -> list[str]:
         args += ["-i", str(inputs.watermark_render.png_path)]
         next_index += 1
 
+    annotation_input_indices: list[int] = []
+    for render in inputs.annotation_renders:
+        annotation_input_indices.append(next_index)
+        args += ["-i", str(render.png_path)]
+        next_index += 1
+
     chains: list[str] = []
     video_labels: list[str] = []
     for i, cue_input in enumerate(inputs.cues):
-        reframe = build_reframe_filter(cue_input.reframe, out_w, out_h, fps)
+        reframe = build_reframe_filter(
+            cue_input.reframe, out_w, out_h, fps, cue_input.cue.reframe_offset
+        )
         plan = plan_effect(cue_input.cue, out_w, out_h, fps)
         chain_filters = [f"[{i}:v]", reframe]
         if plan.filter_snippet:
@@ -122,10 +137,21 @@ def build_command(inputs: RenderInputs, output_path: str | Path) -> list[str]:
     chains.extend(join.chains)
     vjoined = join.final_label
 
-    ann_chain = build_annotation_chain(edl.annotations)
-    after_ann_label = "[vann]" if ann_chain else vjoined
-    if ann_chain:
-        chains.append(f"{vjoined}{ann_chain}{after_ann_label}")
+    drawbox_chain = build_annotation_chain(edl.annotations)
+    ann_src = vjoined
+    if drawbox_chain:
+        chains.append(f"{ann_src}{drawbox_chain}[vdraw]")
+        ann_src = "[vdraw]"
+    if inputs.annotation_renders:
+        chains.extend(build_annotation_overlay_chain(
+            renders=inputs.annotation_renders,
+            input_indices=annotation_input_indices,
+            base_label=ann_src,
+            final_label="[vann]",
+        ))
+        after_ann_label = "[vann]"
+    else:
+        after_ann_label = ann_src
 
     watermark_present = inputs.watermark_render is not None
     captions_present = bool(inputs.caption_renders)
@@ -231,7 +257,7 @@ def build_command(inputs: RenderInputs, output_path: str | Path) -> list[str]:
         "-filter_complex", filter_complex,
         "-map", "[vout]",
         "-map", "[aout]",
-        "-c:v", "libx264", "-preset", inputs.preset, "-crf", str(inputs.crf),
+        *build_video_encode_args(inputs.encoder, inputs.preset, inputs.crf),
         "-pix_fmt", "yuv420p",
         "-r", str(fps),
         "-c:a", "aac", "-b:a", inputs.audio_bitrate,

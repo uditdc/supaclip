@@ -12,9 +12,13 @@ def build_reframe_filter(
     dst_w: int = DEFAULT_WIDTH,
     dst_h: int = DEFAULT_HEIGHT,
     fps: int = DEFAULT_FPS,
+    offset: int = 0,
 ) -> str:
     """Return an ffmpeg filter-chain string that maps any source resolution to
     (dst_w, dst_h) at `fps` frames/s. Used per-input inside a filter_complex.
+
+    `offset` pans the crop window horizontally by that many source pixels
+    (positive = right), clamped to the valid crop range. Ignored for letterbox.
     """
     if mode == "letterbox":
         return (
@@ -24,11 +28,13 @@ def build_reframe_filter(
         )
 
     if mode == "crop_left":
-        x_expr, y_expr = "0", "(in_h-out_h)/2"
+        base_x, y_expr = "0", "(in_h-out_h)/2"
     elif mode == "crop_right":
-        x_expr, y_expr = "in_w-out_w", "(in_h-out_h)/2"
+        base_x, y_expr = "in_w-out_w", "(in_h-out_h)/2"
     else:
-        x_expr, y_expr = "(in_w-out_w)/2", "(in_h-out_h)/2"
+        base_x, y_expr = "(in_w-out_w)/2", "(in_h-out_h)/2"
+
+    x_expr = base_x if offset == 0 else f"clip({base_x}+({offset})\\,0\\,in_w-out_w)"
 
     crop_w = f"min(in_w\\,in_h*{dst_w}/{dst_h})"
     crop_h = f"min(in_h\\,in_w*{dst_h}/{dst_w})"

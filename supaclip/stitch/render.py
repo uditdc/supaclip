@@ -10,8 +10,10 @@ from supaclip.core.edl import EDL, load_edl, save_edl, validate_edl
 from supaclip.core.ffmpeg import ensure_ffmpeg, probe, run_ffmpeg
 from supaclip.stitch.progress import ProgressEvent, run_ffmpeg_with_progress
 from supaclip.core.log import Logger
+from supaclip.stitch.annotation import render_annotation_pngs
 from supaclip.stitch.assembly import CueInput, RenderInputs, build_command
 from supaclip.stitch.captions import chunk_alignment, render_caption_pngs
+from supaclip.stitch.encode import resolution_scale_factor, scale_edl, select_encoder
 from supaclip.stitch.music import build_music_plan, resolve_music_file
 from supaclip.stitch.overlay import render_ost_pngs, render_watermark_png
 from supaclip.stitch.tts import get_backend
@@ -34,6 +36,8 @@ class RenderConfig:
     verbose: bool = False
     print_only: bool = False
     preview_cue: int | None = None      # 0-based index; if set, only that cue is rendered
+    encoder: str = "libx264"
+    resolution: str | None = None        # 720p/1080p/1440p/4k; scales the EDL
     preset: str = "medium"
     crf: int = 20
 
@@ -62,6 +66,20 @@ def render(
     edl = load_edl(config.edl_path)
     log.info(f"title: {edl.title!r}  duration: {edl.output.duration:.1f}s  "
              f"out: {edl.output.width}x{edl.output.height}@{edl.output.fps}")
+
+    if config.resolution is not None:
+        factor = resolution_scale_factor(
+            edl.output.width, edl.output.height, config.resolution
+        )
+        edl = scale_edl(edl, factor)
+        log.info(f"resolution {config.resolution}: scaled "
+                 f"{factor:.3f}x -> {edl.output.width}x{edl.output.height}")
+
+    encoder = select_encoder(config.encoder)
+    if encoder != config.encoder:
+        log.info(f"encoder: {config.encoder} -> {encoder}")
+    else:
+        log.info(f"encoder: {encoder}")
 
     if config.preview_cue is not None:
         if not (0 <= config.preview_cue < len(edl.video)):
@@ -137,6 +155,13 @@ def render(
         )
         log.info(f"rendered watermark png -> {watermark_render.png_path}")
 
+    annotation_renders = []
+    if any(a.shape == "circle" for a in edl.annotations):
+        log.stage("render circle annotations")
+        ann_cache = Path(config.cache_dir).expanduser() / "annotations"
+        annotation_renders = render_annotation_pngs(edl.annotations, ann_cache)
+        log.info(f"rendered {len(annotation_renders)} circle png(s) -> {ann_cache}")
+
     caption_renders = []
     if edl.captions is not None and alignment is not None:
         log.stage("render speech captions")
@@ -172,7 +197,9 @@ def render(
         music_plan=music_plan,
         ost_renders=ost_renders,
         caption_renders=caption_renders,
+        annotation_renders=annotation_renders,
         watermark_render=watermark_render,
+        encoder=encoder,
         preset=config.preset,
         crf=config.crf,
     )

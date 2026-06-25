@@ -85,7 +85,7 @@ Each `video[i]` cue may also carry:
 
 | Field | Default | Description |
 |---|---|---|
-| `reframe_offset` | `0` | future per-cue pixel offset (parsed; not yet applied) |
+| `reframe_offset` | `0` | horizontal pan of the crop window in source pixels (positive = right); clamped to the valid range. Ignored for `letterbox` |
 | `effect` | `"none"` | `"freeze_first"`, `"ken_burns_in"`, `"ken_burns_out"`, `"slow_mo"` |
 | `effect_params` | `{}` | `{ "speed": 0.5 }` for slow_mo, `{ "zoom_from": 1.0, "zoom_to": 1.15 }` for ken_burns |
 | `transition_in` | `"cut"` | `"crossfade"` to fade in from the previous cue |
@@ -138,10 +138,10 @@ enabled, the render fetches alignment from `/v1/text-to-speech/{id}/with-timesta
 chunked into short phrases on punctuation and word/char limits, then each
 chunk is rendered as a PNG and overlaid on top of OST.
 
-Annotation shapes (MVP rendering via ffmpeg `drawbox`):
-- `box` — proper rectangle outline.
-- `circle` — drawn as its square bounding box (true outline lands in 3.x).
-- `arrow` — horizontal bar of length `width` (no arrow head yet).
+Annotation shapes:
+- `box` — proper rectangle outline (ffmpeg `drawbox`).
+- `circle` — true ring outline, rendered as a transparent PIL PNG and overlaid.
+- `arrow` — horizontal bar of length `width` (ffmpeg `drawbox`; no arrow head yet).
 
 ## CLI
 
@@ -158,6 +158,16 @@ stitch render edl.json --print-ffmpeg
 # Render only one cue (fast iteration on effects/annotations)
 stitch render edl.json --preview-cue 2 -o /tmp/cue2.mp4
 
+# Export at a higher resolution (scales the whole composition by short side)
+stitch render edl.json --resolution 4k -o out_4k.mp4
+
+# Hardware-accelerated encode (auto picks a working GPU encoder, else libx264)
+stitch render edl.json --encoder auto -o out.mp4
+stitch render edl.json --encoder hevc_nvenc --crf 24 --preset slow
+
+# List the video encoders this ffmpeg build can actually use
+stitch encoders
+
 # One-off voiceover sample
 stitch voice-preview --voice-id <id> --text "Twelve years."
 
@@ -168,6 +178,23 @@ stitch voices
 Auth: `ELEVENLABS_API_KEY` in `.env` or `--api-key`. Output mp4 lands at
 `<edl>.mp4` by default; a sidecar `<output>.edl.json` is written next to
 the mp4 so re-renders are reproducible.
+
+### Resolution & encoding
+
+By default the render uses the EDL's `output.width`/`height` and software
+`libx264` (`--preset medium --crf 20`). Two flags change that:
+
+- `--resolution {720p,1080p,1440p,2160p,4k}` scales the entire composition so
+  its **short side** matches the preset (e.g. a `1080×1920` EDL at `--resolution
+  4k` → `2160×3840`). All pixel-space fields — annotation geometry, reframe
+  offsets, watermark/caption font sizes — scale with it, so coordinates never
+  need re-authoring. Dimensions are rounded to even values for yuv420p.
+- `--encoder` selects the video encoder. `auto` functionally probes the GPU
+  encoders (`h264_nvenc`, `h264_videotoolbox`, `h264_qsv`) and uses the first
+  that actually initializes, falling back to `libx264`; an explicit choice that
+  isn't usable on this machine fails fast with a clear message. `--crf` and
+  `--preset` map to each encoder's native rate-control (CRF for x264/x265,
+  CQ/VBR for NVENC, quality for VideoToolbox, global-quality for QSV).
 
 ## MCP tools
 
