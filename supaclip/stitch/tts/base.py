@@ -31,7 +31,7 @@ class Alignment:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Alignment":
+    def from_dict(cls, data: dict) -> Alignment:
         return cls(
             characters=list(data["characters"]),
             start_times=[float(t) for t in data["start_times"]],

@@ -7,8 +7,7 @@ from typing import Any
 
 from supaclip.core.clips import ClipSource
 from supaclip.core.edl import EDL, load_edl, save_edl, validate_edl
-from supaclip.core.ffmpeg import ensure_ffmpeg, probe, run_ffmpeg
-from supaclip.stitch.progress import ProgressEvent, run_ffmpeg_with_progress
+from supaclip.core.ffmpeg import ensure_ffmpeg, probe
 from supaclip.core.log import Logger
 from supaclip.stitch.annotation import render_annotation_pngs
 from supaclip.stitch.assembly import CueInput, RenderInputs, build_command
@@ -16,10 +15,10 @@ from supaclip.stitch.captions import chunk_alignment, render_caption_pngs
 from supaclip.stitch.encode import resolution_scale_factor, scale_edl, select_encoder
 from supaclip.stitch.music import build_music_plan, resolve_music_file
 from supaclip.stitch.overlay import render_ost_pngs, render_watermark_png
+from supaclip.stitch.progress import ProgressEvent, run_ffmpeg_with_progress
 from supaclip.stitch.tts import get_backend
 from supaclip.stitch.tts.base import Alignment
 from supaclip.stitch.tts.cache import TTSCache
-
 
 DEFAULT_CACHE_DIR = "~/.cache/supaclip"
 

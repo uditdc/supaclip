@@ -6,8 +6,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-from supaclip.core.edl import EDLOSTCue, EDLWatermark, OSTPosition, OSTStyle, WatermarkPosition
-
+from supaclip.core.edl import EDLOSTCue, EDLWatermark, OSTPosition, OSTStyle
 
 RGBA = tuple[int, int, int, int]
 

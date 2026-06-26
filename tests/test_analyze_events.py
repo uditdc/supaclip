@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from supaclip.extract.analyze import SegmentEvent
 from supaclip.extract.backends._shared import _coerce, _prune_overlaps
 from supaclip.extract.backends.frames import _frame_count_for, _grid_dims
-from supaclip.extract.analyze import SegmentEvent
 from supaclip.extract.profiles import GTA_PROFILE
 
 

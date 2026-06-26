@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 DEFAULT_TARGET_SECONDS = 30.0
 DEFAULT_MAX_SECONDS = 45.0
 DEFAULT_OVERLAP_SECONDS = 5.0

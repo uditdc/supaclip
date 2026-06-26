@@ -14,7 +14,6 @@ from ..analyze import SegmentAnalysis, SegmentEvent
 from ..profiles import GameProfile, VideoContext
 from ._shared import _coerce, _context_block, _parse_json, _signals_block, _taxonomy_str
 
-
 FRAMES_FLOOR = 6
 SECONDS_PER_FRAME = 1.0
 TILE_PX = 512

@@ -16,10 +16,10 @@ from supaclip.core.edl import (
 from supaclip.stitch.captions import (
     CAPTION_POSITION_FRACTION,
     CAPTION_STYLE_PRESETS,
+    _hex_to_rgba,
     build_caption_overlay_chain,
     chunk_alignment,
     render_caption_pngs,
-    _hex_to_rgba,
 )
 from supaclip.stitch.tts.base import Alignment
 

@@ -33,7 +33,7 @@ def _build_server():
         raise SystemExit(
             "MCP support not installed. Install with: pip install -e \".[mcp]\"\n"
             f"({e})"
-        )
+        ) from e
 
     server = FastMCP("supaclip")
     catalog_path = _catalog_path()
@@ -195,6 +195,7 @@ def _build_server():
         """
         import json as _json
         import tempfile
+
         from supaclip.stitch.encode import ENCODER_CHOICES, RESOLUTION_CHOICES
         from supaclip.stitch.render import RenderConfig, render
 

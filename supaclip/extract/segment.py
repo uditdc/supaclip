@@ -3,9 +3,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from ..core.ffmpeg import VideoInfo
 from .chunking import chunk_segment
-
 
 Range = tuple[float, float]
 
@@ -105,7 +103,7 @@ def interval_segments(
 
 def scene_segments(video_path: str, min_clip: float, max_clip: float) -> list[Range]:
     """Detect shot boundaries via PySceneDetect, then bucket frames into ranges."""
-    from scenedetect import open_video, SceneManager
+    from scenedetect import SceneManager, open_video
     from scenedetect.detectors import ContentDetector
 
     video = open_video(video_path)

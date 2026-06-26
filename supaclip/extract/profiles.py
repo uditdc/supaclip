@@ -6,7 +6,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
 SignalType = Literal["int", "float", "str", "list[str]", "bool"]
 
 
@@ -24,7 +23,7 @@ class Character(BaseModel):
     description: str = ""
 
     @model_validator(mode="after")
-    def _resolve_images(self) -> "Character":
+    def _resolve_images(self) -> Character:
         resolved: list[str] = []
         for raw in self.images:
             p = Path(raw).expanduser()
@@ -44,7 +43,7 @@ class VideoContext(BaseModel):
         return not self.intro.strip() and not self.characters
 
     @classmethod
-    def load(cls, path: str | Path) -> "VideoContext":
+    def load(cls, path: str | Path) -> VideoContext:
         p = Path(path).expanduser()
         with p.open("r", encoding="utf-8") as fh:
             data = json.load(fh)

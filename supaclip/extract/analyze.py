@@ -5,7 +5,6 @@ from typing import Any, Protocol
 
 from .profiles import GameProfile, VideoContext
 
-
 PROMPT_VERSION = "v7"
 
 

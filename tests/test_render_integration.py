@@ -230,7 +230,12 @@ def test_render_print_ffmpeg_skips_execution(tmp_path: Path, capsys):
     """--print-ffmpeg should write the command to stdout without running."""
     from supaclip.catalog import add_manifest, connect
     from supaclip.core.manifest import (
-        Clip, ExtractInfo, Manifest, SourceInfo, now_iso, save_manifest,
+        Clip,
+        ExtractInfo,
+        Manifest,
+        SourceInfo,
+        now_iso,
+        save_manifest,
     )
     from supaclip.stitch.render import RenderConfig, render
 
