@@ -165,14 +165,34 @@ def test_build_command_ken_burns_inserts_zoompan(tmp_path):
     assert "zoompan=z=" in fc
 
 
-def test_build_command_annotation_inserts_drawbox(tmp_path):
+def test_build_command_box_annotation_inserts_drawbox(tmp_path):
     edl, cues = _two_cue_edl(with_vo=False)
     edl.annotations.append(EDLAnnotation(
-        start=0.5, end=2.0, shape="circle", x=540, y=700, radius=180
+        start=0.5, end=2.0, shape="box", x=540, y=700, width=200, height=120
     ))
     args = build_command(RenderInputs(edl=edl, cues=cues), tmp_path / "out.mp4")
     fc = args[args.index("-filter_complex") + 1]
     assert "drawbox=" in fc
+    assert "[vdraw]" in fc
+
+
+def test_build_command_circle_annotation_overlays_png(tmp_path):
+    from supaclip.stitch.annotation import AnnotationRender
+
+    edl, cues = _two_cue_edl(with_vo=False)
+    edl.annotations.append(EDLAnnotation(
+        start=0.5, end=2.0, shape="circle", x=540, y=700, radius=180
+    ))
+    circle_png = tmp_path / "circle.png"
+    circle_png.write_bytes(b"\x89PNG\r\n")
+    renders = [AnnotationRender(png_path=circle_png, x=350, y=510, start=0.5, end=2.0)]
+    args = build_command(
+        RenderInputs(edl=edl, cues=cues, annotation_renders=renders),
+        tmp_path / "out.mp4",
+    )
+    fc = args[args.index("-filter_complex") + 1]
+    assert str(circle_png) in args
+    assert "overlay=x=350:y=510" in fc
     assert "[vann]" in fc
 
 

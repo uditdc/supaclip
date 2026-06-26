@@ -173,6 +173,8 @@ def _build_server():
         edl: dict[str, Any] | None = None,
         edl_path: str | None = None,
         output_path: str | None = None,
+        resolution: str | None = None,
+        encoder: str = "libx264",
     ) -> dict[str, Any]:
         """Render an EDL to an mp4 (synthesizes voiceover, reframes,
         concatenates, overlays text, mixes audio).
@@ -180,6 +182,10 @@ def _build_server():
         Provide either `edl` (the dict) or `edl_path` (a path on disk). If
         `output_path` is omitted, the mp4 is written to a tempfile and the
         path is returned. A sidecar `<output>.edl.json` is always written.
+
+        `resolution` (optional) scales the whole composition by short side:
+        one of "720p", "1080p", "1440p", "2160p", "4k". `encoder` selects the
+        video encoder ("auto" picks a working GPU encoder, else "libx264").
 
         Requires a TTS API key in the MCP server's environment if the EDL
         contains a voiceover: `ELEVENLABS_API_KEY` for the default `elevenlabs`
@@ -189,10 +195,17 @@ def _build_server():
         """
         import json as _json
         import tempfile
+        from supaclip.stitch.encode import ENCODER_CHOICES, RESOLUTION_CHOICES
         from supaclip.stitch.render import RenderConfig, render
 
         if not edl and not edl_path:
             return {"status": "error", "message": "supply edl or edl_path"}
+        if resolution is not None and resolution not in RESOLUTION_CHOICES:
+            return {"status": "error",
+                    "message": f"resolution must be one of {list(RESOLUTION_CHOICES)}"}
+        if encoder not in ENCODER_CHOICES:
+            return {"status": "error",
+                    "message": f"encoder must be one of {list(ENCODER_CHOICES)}"}
 
         if edl_path:
             path = edl_path
@@ -209,6 +222,8 @@ def _build_server():
             edl_path=path,
             output_path=output_path,
             catalog_path=str(catalog_path),
+            resolution=resolution,
+            encoder=encoder,
         )
         try:
             result = render(cfg)

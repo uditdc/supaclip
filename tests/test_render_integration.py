@@ -212,13 +212,15 @@ def test_render_v11_features_end_to_end(tmp_path: Path):
         catalog_path=str(catalog_path),
         cache_dir=str(tmp_path / "cache"),
         use_cache=True,
+        resolution="1080p",
     )
     with patch("supaclip.stitch.render._synthesize", return_value=(vo_wav, None)):
         result = render(cfg)
 
     info = probe(result.output)
-    assert info.width == 480
-    assert info.height == 854
+    # 480x854 short side scaled to 1080 (factor 2.25), rounded to even
+    assert info.width == 1080
+    assert info.height == 1922
     assert abs(info.duration - 8.0) < 0.3
     assert info.has_audio
 

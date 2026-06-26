@@ -78,7 +78,10 @@ between steps — go straight through to a rendered mp4.
    `issues` array, fix the EDL (swap a different clip, adjust `source_in`,
    shorten a cue), and re-validate. Loop until `ok=true`. Never skip this.
 7. **Render.** Call `render_edl(edl=<the dict>)`. If you want a specific
-   filename, pass `output_path="/tmp/<title-slug>.mp4"`. On `status: "ok"`,
+   filename, pass `output_path="/tmp/<title-slug>.mp4"`. For a higher-res or
+   GPU-accelerated export, also pass `resolution="4k"` (or `720p`/`1080p`/
+   `1440p`/`2160p`) and/or `encoder="auto"` — these are render arguments, not
+   EDL fields, so leave `output.width`/`height` alone. On `status: "ok"`,
    report the `output` path and the duration.
 8. **Recover.** If `render_edl` returns `status: "error"`, show me the
    `message` and tell me what to do next (e.g. missing `ELEVENLABS_API_KEY`,

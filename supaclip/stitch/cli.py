@@ -43,6 +43,18 @@ def build_parser() -> argparse.ArgumentParser:
                     metavar="N",
                     help="render only cue index N (0-based); fast iteration")
 
+    from supaclip.stitch.encode import ENCODER_CHOICES, RESOLUTION_CHOICES
+    pr.add_argument("--encoder", default="libx264", choices=ENCODER_CHOICES,
+                    help="video encoder; 'auto' picks the best available hardware "
+                         "encoder (default: libx264)")
+    pr.add_argument("--resolution", default=None, choices=RESOLUTION_CHOICES,
+                    help="scale the composition to this resolution by short side "
+                         "(e.g. 1080p, 4k); default: EDL output dimensions")
+    pr.add_argument("--preset", default="medium",
+                    help="encoder speed/quality preset (default: medium)")
+    pr.add_argument("--crf", type=int, default=20,
+                    help="constant-quality level, lower = higher quality (default: 20)")
+
     pv = sub.add_parser("validate", help="validate an EDL against the catalog")
     pv.add_argument("edl")
     pv.add_argument("--catalog", default=None)
@@ -66,6 +78,9 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--api-key", default=None)
     pl.add_argument("--json", dest="emit_json", action="store_true")
 
+    pe = sub.add_parser("encoders", help="list video encoders ffmpeg can use")
+    pe.add_argument("--json", dest="emit_json", action="store_true")
+
     return p
 
 
@@ -85,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_voice_preview(args)
     if args.cmd == "voices":
         return _cmd_voices(args)
+    if args.cmd == "encoders":
+        return _cmd_encoders(args)
 
     parser.error(f"unknown command: {args.cmd}")
     return 2
@@ -114,6 +131,10 @@ def _cmd_render(args) -> int:
         verbose=args.verbose,
         print_only=args.print_ffmpeg,
         preview_cue=args.preview_cue,
+        encoder=args.encoder,
+        resolution=args.resolution,
+        preset=args.preset,
+        crf=args.crf,
     )
 
     try:
@@ -121,6 +142,9 @@ def _cmd_render(args) -> int:
     except RenderError as e:
         log.error(str(e))
         return 1
+    except ValueError as e:
+        log.error(str(e))
+        return 2
     except KeyboardInterrupt:
         log.error("interrupted")
         return 130
@@ -224,6 +248,34 @@ def _cmd_voices(args) -> int:
     else:
         for v in voices:
             sys.stdout.write(f"{v.voice_id}\t{v.name}\n")
+    return 0
+
+
+def _cmd_encoders(args) -> int:
+    from supaclip.core.ffmpeg import list_encoders
+    from supaclip.core.log import Logger
+    from supaclip.stitch.encode import ENCODER_PROFILES
+
+    log = Logger()
+    try:
+        available = list_encoders()
+    except Exception as e:  # noqa: BLE001
+        log.error(f"{type(e).__name__}: {e}")
+        return 1
+
+    rows = [
+        {"encoder": name, "family": prof.family,
+         "hardware": prof.hardware, "available": name in available}
+        for name, prof in ENCODER_PROFILES.items()
+    ]
+    if args.emit_json:
+        json.dump(rows, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    else:
+        for r in rows:
+            mark = "✓" if r["available"] else "·"
+            kind = "hw" if r["hardware"] else "sw"
+            sys.stdout.write(f"{mark} {r['encoder']:<20} {r['family']:<5} {kind}\n")
     return 0
 
 

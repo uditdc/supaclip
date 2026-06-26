@@ -165,6 +165,42 @@ def extract_keyframes(
     return paths
 
 
+def list_encoders() -> set[str]:
+    """Return the set of encoder names this ffmpeg build can use (`ffmpeg -encoders`)."""
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, text=True, check=False,
+        )
+    except FileNotFoundError as e:
+        raise FFmpegError(str(e)) from e
+
+    names: set[str] = set()
+    for line in (proc.stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and len(parts[0]) == 6 and parts[0][0] == "V":
+            names.add(parts[1])
+    return names
+
+
+def probe_encoder(codec: str) -> bool:
+    """Return True if ffmpeg can actually initialize `codec` (real 1-frame encode).
+
+    `ffmpeg -encoders` lists codecs compiled in, not ones that work here: a build
+    can advertise h264_nvenc with no GPU present. This catches that.
+    """
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "-f", "lavfi", "-i", "color=c=black:s=64x64:r=1:d=1",
+        "-c:v", codec, "-frames:v", "1", "-f", "null", "-",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
 def run_ffmpeg(args: list[str]) -> str:
     """Run an `ffmpeg` invocation. `args` should NOT include the leading `ffmpeg`.
     Returns stderr text (where ffmpeg writes progress/info). Raises FFmpegError on non-zero exit."""

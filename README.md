@@ -121,7 +121,15 @@ walkthrough.
 ```bash
 stitch validate examples/edl-gta6-hair.json
 stitch render   examples/edl-gta6-hair.json -o short.mp4
+
+# Export at 4K, with GPU encoding when available
+stitch render   examples/edl-gta6-hair.json --resolution 4k --encoder auto -o short.mp4
+stitch encoders   # list the video encoders this ffmpeg build can use
 ```
+
+`--resolution {720p,1080p,1440p,2160p,4k}` scales the whole composition by its
+short side; `--encoder auto` uses a working GPU encoder (NVENC / VideoToolbox /
+QSV) and falls back to `libx264`. See [`docs/stitch.md`](docs/stitch.md#resolution--encoding).
 
 ElevenLabs is the default TTS backend (`ELEVENLABS_API_KEY` in `.env`),
 mirroring the pluggable analyzer pattern from Extract. Google AI Studio

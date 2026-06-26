@@ -39,7 +39,9 @@ is empty or an MCP tool returns an unrecoverable error.**
 6. **`validate_edl(edl)`** — if `ok == false`, fix the issues from the
    response and re-validate. Loop until clean. Never skip.
 7. **`render_edl(edl=<dict>, output_path="/tmp/<slug>.mp4")`** — on
-   `status: "ok"`, report the output path and duration to the user.
+   `status: "ok"`, report the output path and duration to the user. Pass
+   `resolution=` (e.g. `"4k"`) and/or `encoder="auto"` when the user asks
+   for a higher-res or GPU-accelerated export (see "Resolution & encoding").
 8. **On `render_edl` error**, show the `message` verbatim and suggest a
    fix (missing `ELEVENLABS_API_KEY`, ffmpeg failure, bad voice_id).
 
@@ -61,7 +63,7 @@ is empty or an MCP tool returns an unrecoverable error.**
       "start": 0.0, "end": 4.0, "clip_id": 17,
       "source_in": 12.5,
       "reframe": "crop_center",
-      "reframe_offset": 0,
+      "reframe_offset": 0,            // +/- pixels to pan the crop horizontally
       "effect": "none",
       "effect_params": {},
       "transition_in": "cut",
@@ -196,7 +198,8 @@ For "crossfade between cues", set `transition_in: "crossfade"` and
 | "arrow pointing at" | `arrow` | `x`, `y`, `width` (length) |
 
 Position the annotation by guessing from the b-roll description; the
-user can adjust `x/y/radius` after a preview render.
+user can adjust `x/y/radius` after a preview render. `circle` draws a true
+ring outline; `box` a rectangle outline; `arrow` a horizontal bar.
 
 ## Music bed (optional)
 
@@ -204,6 +207,28 @@ If the script mentions background music: set `music = { "file":
 "<path>", "level_db": -22.0, "duck": true }`. `file` may be `"catalog:<clip_id>"`
 to use audio from another catalog clip. Omit `music` entirely if not
 mentioned.
+
+## Resolution & encoding (export options)
+
+These are `render_edl` arguments, **not** EDL fields — leave `output.width`/
+`height` at the authored values (usually `1080×1920`) and pass these instead.
+
+- **Resolution.** When the user asks for a specific export size — "4k",
+  "1080p", "720p", "make it 1440p", "high-res version" — pass
+  `resolution="4k"` (or `"720p" | "1080p" | "1440p" | "2160p"`). It scales
+  the whole composition by short side; annotation/offset/font coordinates
+  scale automatically, so you do **not** edit the EDL. Omit it for the
+  default (the EDL's own dimensions).
+- **Encoder.** When the user asks for "GPU", "hardware encoding", "faster
+  render", "nvenc", "use my graphics card" — pass `encoder="auto"` (picks a
+  working GPU encoder, falls back to `libx264`). Pass a specific name only
+  if the user names it (`"h264_nvenc"`, `"hevc_nvenc"`, `"h264_videotoolbox"`,
+  `"h264_qsv"`, etc.). Omit for the default `libx264`. If an explicit encoder
+  isn't usable on the machine, `render_edl` returns an error naming the
+  problem — retry with `encoder="auto"` and tell the user.
+
+Example: a 4K, GPU-encoded export →
+`render_edl(edl=<dict>, output_path="/tmp/<slug>.mp4", resolution="4k", encoder="auto")`.
 
 ## Recovery patterns (most common `validate_edl` errors)
 
@@ -231,8 +256,11 @@ mentioned.
   duration, score, source_in, source_out, keyframes, file, ...}`.
   Use `keyframes` to peek at the visual.
 - `validate_edl(edl)` → `{ok, issues:[{severity, path, message}]}`.
-- `render_edl(edl, output_path?)` → `{status, output, sidecar, duration}`.
-  `status="ok"` means the mp4 is written.
+- `render_edl(edl, output_path?, resolution?, encoder?)` →
+  `{status, output, sidecar, duration}`. `status="ok"` means the mp4 is
+  written. `resolution` ∈ {720p,1080p,1440p,2160p,4k}; `encoder` ∈
+  {auto,libx264,libx265,h264_nvenc,hevc_nvenc,h264_videotoolbox,
+  hevc_videotoolbox,h264_qsv,hevc_qsv} (default libx264).
 
 ## Reporting style
 
