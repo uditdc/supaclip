@@ -8,13 +8,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 from supaclip.core.edl import CaptionPosition, CaptionStyleName, EDLCaptions
 from supaclip.stitch.overlay import (
-    DEFAULT_FONT_CANDIDATES,
     _measure_block,
     _resolve_font,
     _wrap_text,
 )
 from supaclip.stitch.tts.base import Alignment
-
 
 RGBA = tuple[int, int, int, int]
 

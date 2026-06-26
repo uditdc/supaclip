@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "supaclip"
 version = "0.1.0"
-description = "Extract gameplay clips and a Claude-readable manifest from local video"
+description = "Turn long gameplay recordings into short-form videos, with Claude as the editor"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
@@ -34,9 +34,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "build>=1.2"]
+dev = ["pytest>=8.0", "build>=1.2", "ruff>=0.5"]
 mcp = ["mcp>=1.0"]
 align = ["torch>=2.1", "torchaudio>=2.1"]
+
+[project.urls]
+Homepage = "https://github.com/uditdc/supaclip"
+Repository = "https://github.com/uditdc/supaclip"
+Issues = "https://github.com/uditdc/supaclip/issues"
+Changelog = "https://github.com/uditdc/supaclip/blob/main/CHANGELOG.md"
 
 [project.scripts]
 extract = "supaclip.extract.cli:main"
@@ -50,3 +56,15 @@ exclude = ["tests*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+# E501 (line length) is left to formatting judgment; B905 (zip strict=) is noise here.
+ignore = ["E501", "B905"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B017", "E731"]  # broad pytest.raises and lambda fixtures are fine in tests

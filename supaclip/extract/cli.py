@@ -5,7 +5,10 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .profiles import VideoContext
 
 
 def _env(*names: str, default: str | None = None) -> str | None:
@@ -105,7 +108,7 @@ def _parse_character_spec(spec: str) -> dict[str, Any]:
     return {"name": name, "images": images, "description": description}
 
 
-def _build_video_context(args) -> "VideoContext | None":  # noqa: F821 - forward ref
+def _build_video_context(args) -> VideoContext | None:
     from .profiles import Character, VideoContext
 
     intro = (args.video_intro or "").strip()
@@ -160,8 +163,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    from .pipeline import ExtractConfig, run
     from ..core.log import Logger
+    from .pipeline import ExtractConfig, run
 
     log = Logger(verbose=args.verbose)
 

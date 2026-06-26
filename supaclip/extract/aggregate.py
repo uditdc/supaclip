@@ -6,7 +6,6 @@ from typing import Any
 from .backends._shared import _coerce, _parse_json
 from .profiles import GameProfile
 
-
 PROMPT_VERSION = "agg-v3"
 MIN_CLIP_SECONDS = 10.0
 

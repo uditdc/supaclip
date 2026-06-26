@@ -9,7 +9,6 @@ from typing import Any
 from ..analyze import SegmentAnalysis, SegmentEvent
 from ..profiles import GameProfile, VideoContext
 
-
 MIN_EVENT_DURATION = 2.0
 
 

@@ -24,12 +24,14 @@ from ..core.manifest import (
 )
 from .aggregate import (
     PROMPT_VERSION as AGG_PROMPT_VERSION,
+)
+from .aggregate import (
     AggregateConfig,
     aggregate_events,
 )
 from .analyze import PROMPT_VERSION, AnalyzerBackend, blend_score, build_backend
-from .backends._shared import _context_fingerprint
 from .audio import audio_factor_for_range, detect_peaks, peak_loudness_db
+from .backends._shared import _context_fingerprint
 from .chunking import chunk_segment
 from .dedupe import merge_overlapping
 from .profiles import GameProfile, VideoContext, load_profile

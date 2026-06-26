@@ -1,43 +1,110 @@
-# supaclip — Extract CLI
+# supaclip
 
-Phase 1 of `supaclip`. `extract` ingests a local gameplay video, segments it,
-analyzes each segment with a vision-language model, and emits:
+**Turn long gameplay recordings into short-form videos — with Claude as the editor.**
 
-- native-aspect master `.mp4` clips, and
-- a Claude-readable `manifest.json` catalog.
+[![CI](https://github.com/uditdc/supaclip/actions/workflows/ci.yml/badge.svg)](https://github.com/uditdc/supaclip/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Code style: Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-The manifest is the deliverable; Phase 2 ("Stitch") consumes it to assemble
-short-form videos.
+supaclip is a local-first pipeline that ingests raw gameplay footage, uses a
+vision-language model to understand what's in every moment, and lets an LLM
+("Claude as director") assemble polished vertical shorts — voiceover, captions,
+effects, and music included.
+
+```
+ long_session.mp4
+        │
+        ▼
+   ┌─────────┐   native-aspect clips +     ┌──────────┐   searchable
+   │ extract │ ─ Claude-readable manifest ─▶│ catalog  │ ─ SQLite library
+   └─────────┘                              └──────────┘        │
+                                                                │ Claude browses it
+                                                                ▼
+                                                          ┌──────────┐
+                                                          │  stitch  │ ─▶ short.mp4
+                                                          └──────────┘   (1080×1920 … 4K)
+```
+
+1. **`extract`** segments a video and analyzes each segment with a VLM, emitting
+   master clips and a `manifest.json` describing them.
+2. **`catalog`** folds every manifest into one searchable SQLite database.
+3. **`stitch`** renders a finished short from an EDL (Edit Decision List) that
+   Claude composes by browsing the catalog.
+
+---
+
+## Features
+
+- **Local-first.** Default analyzer is a local Ollama model; ffmpeg does all the
+  video work. Hosted models (OpenRouter, Google AI Studio) are opt-in.
+- **Pluggable VLM backends** — sampled-frame or native-video analysis over any
+  OpenAI-compatible endpoint.
+- **Full-text + structured catalog search** (FTS5) across descriptions, audio
+  cues, tags, categories, and game-specific signals.
+- **Short-form renderer** — 9:16 reframe, crossfades, Ken-Burns, freeze frames,
+  slow-mo, styled on-screen text, circle/box/arrow annotations, and a
+  ducked music bed.
+- **Voiceover + speech-synced captions** via ElevenLabs or Google (Gemini) TTS,
+  with on-disk caching so re-renders are free.
+- **Resolution & hardware encoding** — export 720p → 4K, with auto-detected
+  NVENC / VideoToolbox / QSV GPU encoders and a software fallback.
+- **Claude-native** — an MCP server exposes the catalog and renderer to Claude;
+  a Claude Code skill drives the whole script → render flow hands-free.
+
+## Requirements
+
+- Python ≥ 3.10
+- `ffmpeg` and `ffprobe` on `PATH` (`sudo apt install ffmpeg` / `brew install ffmpeg`)
+- An analyzer model — local [Ollama](https://ollama.com) by default, or any
+  hosted OpenAI-compatible endpoint
+- (Optional) a TTS key for voiceover: `ELEVENLABS_API_KEY` or `GEMINI_API_KEY`
 
 ## Install
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev]"          # add ,mcp for the MCP server; ,align for forced alignment
 # or: make install
 ```
 
-Requires `ffmpeg` and `ffprobe` on `PATH`.
+This installs four entry points: `extract`, `stitch`, `supaclip` (an umbrella
+dispatcher — `supaclip extract …` ≡ `extract …`), and `supaclip-mcp`.
 
-Installs four entry points: `extract`, `stitch`, `supaclip`, and (with the
-`[mcp]` extra) `supaclip-mcp`. `supaclip` is an umbrella dispatcher —
-`supaclip extract …` and `extract …` are equivalent.
-
-## Usage
+## Quickstart
 
 ```bash
-# Auto-segment + analyze with local Ollama (default)
+# 1. Configure (see .env.example) — local Ollama works out of the box
+cp .env.example .env
+
+# 2. Extract clips + manifest from a recording
 extract session.mp4
 
-# Cut at user-supplied ranges
+# 3. Add the manifest to your global catalog
+supaclip catalog add clips/manifest.json
+
+# 4. Find clips
+supaclip catalog search "police chase" --min-score 70
+
+# 5. Render a short from an example EDL
+stitch render examples/edl-gta6-hair.json -o short.mp4
+```
+
+> The example EDLs reference `clip_id`s from your own catalog — see
+> [`examples/README.md`](examples/README.md) for how to adapt them.
+
+---
+
+## Stages
+
+### `extract` — footage → clips + manifest
+
+```bash
+extract session.mp4                                   # auto-segment + analyze
 extract session.mp4 --segmenter manual --timestamps cuts.csv
-
-# Scene-detect or fixed windows
-extract session.mp4 --segmenter scene
+extract session.mp4 --segmenter scene                 # scene detection
 extract session.mp4 --segmenter interval --interval 30
-
-# Print the manifest to stdout
-extract session.mp4 --json
+extract session.mp4 --json                            # manifest to stdout
 ```
 
 `cuts.csv` is one `start,end` pair per line (`SS`, `MM:SS`, or `HH:MM:SS`):
@@ -47,58 +114,69 @@ extract session.mp4 --json
 2:00, 2:45
 ```
 
-## Configuration
+### `catalog` — one searchable library
 
-Put a `.env` in the working directory (see `.env.example`). CLI flags override
-env vars. Variables: `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`
-(also accepts the `OPENAI_*` equivalents for the first two).
-
-## Catalog
-
-Each `extract` run produces a per-source `manifest.json`. The `catalog` adds
-those manifests to a single global SQLite database so you can search across
-every clip you've ever extracted.
+Each `extract` run produces a per-source `manifest.json`; the catalog folds them
+into a single SQLite database you can query across every clip you've extracted.
 
 ```bash
-# Ingest a manifest (or a directory; walks recursively)
-supaclip catalog add clips/manifest.json
-
-# FTS5 query over description / audio cues / tags
-supaclip catalog search "police chase"
-
-# Structured filters compose freely
+supaclip catalog add clips/manifest.json              # ingest (file or directory)
+supaclip catalog search "police chase"                # FTS5 free-text
 supaclip catalog search --category shootout --min-score 70
 supaclip catalog search --category police_chase --category crash --all-categories
 supaclip catalog search --signal wanted_level=4
 supaclip catalog search --signal "vehicles~=police"
 supaclip catalog search --min-duration 20 --order-by duration --json
 
-# Catalog admin
 supaclip catalog list --sources
 supaclip catalog stats
 supaclip catalog remove clips/manifest.json
 ```
 
-Catalog location: `~/.local/share/supaclip/catalog.db`. Override with
-`--catalog FILE` or the `SUPACLIP_CATALOG` env var.
+Catalog location: `~/.local/share/supaclip/catalog.db` (override with
+`--catalog FILE` or `SUPACLIP_CATALOG`).
 
-## MCP server
+### `stitch` — EDL → finished short
 
-Expose the catalog to Claude so it can query your library directly.
+Render vertical shorts (default 1080×1920 @ 60 fps) from an EDL. See
+[`docs/stitch.md`](docs/stitch.md) for the full schema and a walkthrough.
+
+```bash
+stitch validate examples/edl-gta6-hair.json
+stitch render   examples/edl-gta6-hair.json -o short.mp4
+
+# Higher-res / GPU-accelerated export
+stitch render   examples/edl-gta6-hair.json --resolution 4k --encoder auto -o short.mp4
+stitch encoders                                       # list usable video encoders
+```
+
+`--resolution {720p,1080p,1440p,2160p,4k}` scales the whole composition by its
+short side; `--encoder auto` picks a working GPU encoder (NVENC / VideoToolbox /
+QSV) and falls back to `libx264`. Full details in
+[`docs/stitch.md`](docs/stitch.md#resolution--encoding).
+
+**TTS:** ElevenLabs is the default backend (`ELEVENLABS_API_KEY`). Google
+(Gemini) is available via `"backend": "google"` on the EDL voiceover with
+`GEMINI_API_KEY` — pick a voice with `stitch voices --backend google`. Gemini
+returns audio only, so speech-synced captions there use **local forced
+alignment** (`pip install 'supaclip[align]'`; the MMS_FA model downloads once,
+then caches). ElevenLabs returns word timestamps natively.
+
+## Claude integration
+
+### MCP server
+
+Expose the catalog and renderer to Claude so it can browse your library and
+render directly.
 
 ```bash
 pip install -e ".[mcp]"
 
 # Register with the ABSOLUTE path to the venv binary — Claude Code spawns
-# subprocesses without activating any venv, so `supaclip-mcp` on its own
-# won't be on PATH. The script has the venv's python in its shebang.
+# subprocesses without activating any venv.
 claude mcp add supaclip "$(pwd)/.venv/bin/supaclip-mcp"
-```
 
-Pass env vars for non-default catalog or for the ElevenLabs key that
-`render_edl` needs:
-
-```bash
+# With a non-default catalog and a TTS key for render_edl:
 claude mcp add supaclip \
   --env SUPACLIP_CATALOG=/path/to/catalog.db \
   --env ELEVENLABS_API_KEY=sk_... \
@@ -106,84 +184,52 @@ claude mcp add supaclip \
 ```
 
 Tools exposed: `catalog_search`, `catalog_get_clip`, `catalog_get_source`,
-`catalog_list_sources`, `catalog_stats`, plus `get_clip_preview`,
-`validate_edl`, and `render_edl` from Stitch. `render_edl` may spend
-ElevenLabs credits, but TTS outputs are cached by `(text + voice + settings)`
-so re-renders of the same script are free.
+`catalog_list_sources`, `catalog_stats`, `get_clip_preview`, `validate_edl`, and
+`render_edl`. `render_edl` may spend TTS credits, but outputs are cached by
+`(text + voice + settings)` so re-renders of the same script are free.
 
-## Stitch — short-form video assembly
+### Claude Code skill
 
-Render YouTube-Shorts/TikTok-style verticals (default 1080×1920 @ 60 fps)
-from an EDL (Edit Decision List) that Claude composes by browsing the
-catalog. See [`docs/stitch.md`](docs/stitch.md) for the schema and a
-walkthrough.
+The persistent skill at
+[`.claude/skills/stitch-director/SKILL.md`](.claude/skills/stitch-director/SKILL.md)
+auto-loads whenever you mention "short", "stitch", "EDL", "b-roll", etc. — it
+drives the full `catalog_search → validate_edl → render_edl` flow without
+re-prompting. For a one-shot paste-in version, use
+[`docs/claude-prompt.md`](docs/claude-prompt.md).
 
-```bash
-stitch validate examples/edl-gta6-hair.json
-stitch render   examples/edl-gta6-hair.json -o short.mp4
+## Configuration
 
-# Export at 4K, with GPU encoding when available
-stitch render   examples/edl-gta6-hair.json --resolution 4k --encoder auto -o short.mp4
-stitch encoders   # list the video encoders this ffmpeg build can use
-```
+Put a `.env` in the working directory (see [`.env.example`](.env.example)); CLI
+flags override env vars.
 
-`--resolution {720p,1080p,1440p,2160p,4k}` scales the whole composition by its
-short side; `--encoder auto` uses a working GPU encoder (NVENC / VideoToolbox /
-QSV) and falls back to `libx264`. See [`docs/stitch.md`](docs/stitch.md#resolution--encoding).
+| Variable | Purpose |
+|---|---|
+| `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | analyzer endpoint (or `OPENAI_*`) |
+| `ELEVENLABS_API_KEY` | ElevenLabs TTS (default stitch voiceover) |
+| `GEMINI_API_KEY` | Google AI Studio TTS / native-video analyzer |
+| `SUPACLIP_CATALOG` | catalog DB path override |
 
-ElevenLabs is the default TTS backend (`ELEVENLABS_API_KEY` in `.env`),
-mirroring the pluggable analyzer pattern from Extract. Google AI Studio
-(Gemini) is also available — set `"backend": "google"` on the EDL voiceover
-and provide `GEMINI_API_KEY`. Pick a prebuilt voice (e.g. `Kore`, `Puck`)
-via `stitch voices --backend google`. Gemini returns audio only, so speech-synced
-`captions` there are timed by local forced alignment — install it with
-`pip install 'supaclip[align]'` (first render downloads the MMS_FA model once,
-then it's cached); `elevenlabs` returns timestamps natively.
+## Documentation
 
-For the one-shot **script → EDL → validate → render** flow inside Claude
-Code, paste [`docs/claude-prompt.md`](docs/claude-prompt.md) into a session
-that has the `supaclip` MCP server registered.
+| Doc | Contents |
+|---|---|
+| [`docs/stitch.md`](docs/stitch.md) | EDL schema, CLI, resolution & encoding, walkthrough |
+| [`docs/architecture.md`](docs/architecture.md) | module layout and data flow |
+| [`docs/prd.md`](docs/prd.md) | product requirements (Extract) |
+| [`docs/phase2.md`](docs/phase2.md), [`docs/phase2.5.md`](docs/phase2.5.md) | Stitch design notes |
+| [`docs/claude-prompt.md`](docs/claude-prompt.md) | paste-in director prompt |
 
-A persistent **Claude Code skill** at `.claude/skills/stitch-director.md`
-auto-loads the workflow whenever you mention "short", "stitch", "EDL",
-"b-roll", etc. — no need to re-paste the prompt every session.
-[`docs/phase2.5.md`](docs/phase2.5.md) describes Phase 2.5 (effects,
-transitions, annotations, music bed).
-
-## Run tests
+## Development
 
 ```bash
-pytest
-# or: make test
-```
-
-## Build & release
-
-The CLI is packaged as a standard Python wheel + sdist via
-[PEP 517](https://peps.python.org/pep-0517/). Common workflows:
-
-```bash
+make test          # pytest
 make build         # sdist + wheel into dist/
-make wheel         # wheel only
-make sdist         # sdist only
-make dist-check    # twine check on dist/*
-make clean         # remove build artifacts and caches
+make dist-check    # twine check dist/*
 ```
 
-Equivalent without Make:
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for dev setup, code style, and the PR
+process, and [`CHANGELOG.md`](CHANGELOG.md) for release history.
 
-```bash
-python -m pip install --upgrade build twine
-python -m build           # writes dist/supaclip-<version>.{tar.gz,whl}
-python -m twine check dist/*
-```
+## License
 
-Publishing (requires `TWINE_USERNAME` / `TWINE_PASSWORD` or a `~/.pypirc`):
-
-```bash
-make publish-test  # upload to TestPyPI
-make publish       # upload to PyPI
-```
-
-The wheel installs `extract`, `stitch`, `supaclip`, and `supaclip-mcp`
-entry points; users only need `ffmpeg`/`ffprobe` on `PATH` to run it.
+[MIT](LICENSE) © Udit

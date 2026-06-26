@@ -20,7 +20,7 @@ from supaclip.stitch.overlay import (
     build_watermark_overlay_chain,
 )
 from supaclip.stitch.reframe import build_reframe_filter
-from supaclip.stitch.transitions import build_join_chain, needs_xfade_chain
+from supaclip.stitch.transitions import build_join_chain
 
 
 @dataclass

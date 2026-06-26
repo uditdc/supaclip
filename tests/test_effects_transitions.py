@@ -8,7 +8,6 @@ from supaclip.stitch.effects import plan_effect
 from supaclip.stitch.music import build_music_plan, resolve_music_file
 from supaclip.stitch.transitions import build_join_chain, needs_xfade_chain
 
-
 # ---- effects ----
 
 def test_plan_none_returns_cue_duration_and_empty_snippet():

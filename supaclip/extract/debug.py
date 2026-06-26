@@ -13,7 +13,6 @@ from .backends.frames import FramesBackend, PreparedRequest
 from .chunking import chunk_segment
 from .profiles import GameProfile
 
-
 TOKENS_PER_TILE_ESTIMATE = 256
 
 
@@ -469,7 +468,7 @@ def _write_chunks_html(
     end: float,
     chunks: list[tuple[float, float]],
     peaks: list,
-    chunk_results: list[tuple[int, tuple[float, float], "DebugWriteResult"]],
+    chunk_results: list[tuple[int, tuple[float, float], DebugWriteResult]],
     model: str,
     profile_name: str,
     total_tokens: int,

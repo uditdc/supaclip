@@ -20,7 +20,6 @@ from ._shared import (
     _taxonomy_str,
 )
 
-
 CHUNK_SECONDS = 480.0
 TARGET_WIDTH = 720
 TARGET_VIDEO_BITRATE = "800k"
