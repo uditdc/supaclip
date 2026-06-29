@@ -70,6 +70,10 @@ def build_command(inputs: RenderInputs, output_path: str | Path) -> list[str]:
     for cue_input in inputs.cues:
         plan = plan_effect(cue_input.cue, out_w, out_h, fps)
         args += [
+            # tolerate corrupt packets in real-world source rips (e.g. flaky
+            # AAC frames) by skipping them instead of aborting the whole render
+            "-err_detect", "ignore_err",
+            "-fflags", "+discardcorrupt",
             "-ss", f"{cue_input.source_in:.3f}",
             "-t", f"{plan.source_consumed:.3f}",
             "-i", cue_input.file_path,

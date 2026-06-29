@@ -107,6 +107,15 @@ def test_build_command_with_clip_audio_cue(tmp_path):
     assert "dynaudnorm" not in fc and "alimiter" not in fc
 
 
+def test_build_command_source_inputs_tolerate_corruption(tmp_path):
+    edl, cues = _two_cue_edl()
+    args = build_command(RenderInputs(edl=edl, cues=cues), tmp_path / "out.mp4")
+    # each source input is preceded by error-tolerance flags so a corrupt packet
+    # in a real-world rip is skipped rather than aborting the render
+    assert "-err_detect" in args and "ignore_err" in args
+    assert "+discardcorrupt" in args
+
+
 def test_build_command_includes_output_settings(tmp_path):
     edl, cues = _two_cue_edl()
     args = build_command(RenderInputs(edl=edl, cues=cues,
