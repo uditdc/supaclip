@@ -346,6 +346,14 @@ annotations[]  { start, end, shape: "circle" | "box" | "arrow", x, y, …, color
 music?         { file, level_db=-22, duck=true }
 ```
 
+Captions have two timing sources: speech-synced from the voiceover (default,
+via TTS character timestamps) or **pre-timed `captions.cues`** — explicit
+`{start,end,text}` lines (e.g. the source film's own subtitles, offset to
+clip-local time) styled and burned in with no voiceover required. The
+`movie-clips` mode uses this with `clip_audio` (one segment per beat, original
+audio lifted by a per-clip constant `level_db` gain that peak-normalizes the
+quiet film audio — no limiter, so no reactive pumping).
+
 `validate_edl()` enforces:
 
 - monotonic, gap-free, non-overlapping `video[]` covering `[0, duration]`,

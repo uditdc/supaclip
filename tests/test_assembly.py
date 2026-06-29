@@ -103,6 +103,8 @@ def test_build_command_with_clip_audio_cue(tmp_path):
     fc = args[args.index("-filter_complex") + 1]
     assert "[abg0]" in fc
     assert "volume=-12.0dB" in fc
+    # a fixed per-clip gain is just the volume filter — no adaptive processing
+    assert "dynaudnorm" not in fc and "alimiter" not in fc
 
 
 def test_build_command_includes_output_settings(tmp_path):

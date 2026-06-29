@@ -1,7 +1,7 @@
 # 0004 — Movie output modes: "movie recap" vs "movie clips"
 
-- **Status:** accepted (recap built; clips planned)
-- **Date:** 2026-06-29
+- **Status:** accepted (recap built; clips engine built)
+- **Date:** 2026-06-29 (updated 2026-06-30)
 - **Relates to:** [0001](0001-movie-recap-layering.md) (layering),
   [0003](0003-source-summary-rollup.md) (story spine).
 
@@ -28,29 +28,41 @@ extract `profiles` (`extract/profiles.py`) describe *analysis vocabulary* (the
 `movie` profile's taxonomy/signals); both modes consume its output. Avoid
 calling them "profiles" in code to prevent confusion with `GameProfile`.
 
-## movie clips — implementation sketch (when built)
+## movie clips — as built
 
-Almost no new engine; it's a thin selection + export recipe over existing
-primitives:
+One ~30–60s segment per **beat** of the source summary, each a standalone
+vertical short with the film's **original audio** and its **own subtitles**
+burned in, styled like ours. No voiceover. The engine pieces added:
 
-- **Select** the top segments by score, filtered to a 30–60s window
-  (`catalog_search(min_duration=30, max_duration=60, order_by="score" or a
-  narrative score, ...)`). Each surviving clip is one output.
-- **Export** each as its own short: reframe to 9:16, optional OST hook/label,
-  optional music — **no voiceover, no captions**, keep or duck clip audio.
-  This is a degenerate EDL (single video cue, `audio.kind="clip_audio"`).
-- **Depends on Phase 3 narrative scoring** to make "interesting" mean
-  story-meaningful rather than merely loud — the same ranking the recap's
-  beat-aware selection needs. Build scoring once; both modes use it.
+- **Source-timed captions.** `EDLCaptions.cues` (list of `EDLCaptionCue
+  {start,end,text}`) lets captions be driven by explicit pre-timed lines
+  instead of voiceover alignment; `validate_edl` allows captions without a
+  voiceover when cues are present; `render.py` styles them via the existing
+  caption renderer (`captions.chunks_from_cues`). The film's `.srt` cues for a
+  clip's window are offset to clip-local time and passed in.
+- **Original audio, peak-normalized.** Film dialogue is mastered quiet, so each
+  clip gets a **per-clip constant gain** set as the cue's `level_db`: the
+  generator measures the segment's true peak (`ffmpeg volumedetect`) and lands
+  it just under 0 dB. A single fixed gain per clip — no limiter, no adaptive
+  normalizer — keeps loudness consistent across clips with **no intra-clip
+  pumping/flicker**. (Adaptive `dynaudnorm` and a `+12 dB`+`alimiter` boost were
+  both tried and rejected: the limiter pumped audibly right before each line of
+  dialogue.) No engine audio change — just `EDLAudioCue.level_db`.
+  Trade-off: peak-normalization is bounded by the clip's loudest moment, so
+  dialogue in clips with loud effects/music stays relatively quiet; lifting it
+  further would require dynamic-range compression (mild adaptiveness).
+- **Selection:** per beat, the highest-score catalog clip ≥30s, windowed to
+  ≤60s. Phase-3 narrative scoring will improve "interesting" later; score is a
+  serviceable proxy now.
 
-Likely shipped as a sibling skill (`movie-clips`) and/or a
-`supaclip clips <source>` CLI wrapper.
+Each clip is a single-video-cue EDL: `clip_audio` (normalized) + `captions.cues`
+from the source subtitles. Driven today by a generator script; a `movie-clips`
+skill + `supaclip clips` CLI are the natural app-layer wrappers.
 
-## Open questions (defer to build time)
+## Open questions (deferred)
 
 - One file per clip vs an optional stitched "highlights reel" compilation.
-- Whether clips keep original dialogue audio (likely yes) and burn the film's
-  own subtitles as captions (the dialogue is already in the catalog).
+- Per-beat segment choice once Phase-3 narrative scoring lands.
 
 ## Consequences
 

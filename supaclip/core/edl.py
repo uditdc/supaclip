@@ -99,12 +99,22 @@ class EDLAudioCue(BaseModel):
     duck: bool = False
 
 
-class EDLCaptions(BaseModel):
-    """Speech-synced captions derived automatically from the voiceover.
+class EDLCaptionCue(BaseModel):
+    """One pre-timed caption line (e.g. a source subtitle), in output time."""
+    model_config = ConfigDict(extra="forbid")
+    start: float
+    end: float
+    text: str
 
-    Distinct from `ost`: OST is hand-authored emphasis text, captions are
-    auto-timed phrases that appear in sync with the spoken voiceover using
-    character-level timestamps from the TTS backend.
+
+class EDLCaptions(BaseModel):
+    """Styled captions, either speech-synced from the voiceover or pre-timed.
+
+    Distinct from `ost`: OST is hand-authored emphasis text. Captions are timed
+    phrases shown in our styles. By default their timing is derived from the
+    voiceover via character-level TTS timestamps. Alternatively, pass explicit
+    `cues` (e.g. the source film's own subtitles) and they are styled and burned
+    in at those times with no voiceover required.
     """
     model_config = ConfigDict(extra="forbid")
     style: CaptionStyleName = "clean_white"
@@ -115,6 +125,7 @@ class EDLCaptions(BaseModel):
     font_size: int | None = None
     highlight: CaptionHighlight = "none"
     highlight_color: str = "#FFD600"
+    cues: list[EDLCaptionCue] = Field(default_factory=list)
 
 
 class EDLOSTCue(BaseModel):
@@ -318,11 +329,17 @@ def validate_edl(edl: EDL, resolver: ClipResolver | None = None) -> list[Validat
         ))
 
     if edl.captions is not None:
-        if edl.voiceover is None:
+        if edl.voiceover is None and not edl.captions.cues:
             issues.append(ValidationIssue(
                 "error", "captions",
-                "captions require a voiceover to derive timing from",
+                "captions require a voiceover to derive timing from, or explicit cues",
             ))
+        for i, cue in enumerate(edl.captions.cues):
+            _check_range(issues, f"captions.cues[{i}]", cue.start, cue.end, out.duration)
+            if not cue.text.strip():
+                issues.append(ValidationIssue(
+                    "error", f"captions.cues[{i}].text", "must not be empty",
+                ))
         if edl.captions.max_words <= 0:
             issues.append(ValidationIssue(
                 "error", "captions.max_words", "must be > 0",
