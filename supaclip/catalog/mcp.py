@@ -12,6 +12,7 @@ from .search import (
     ClipRow,
     get_clip,
     get_source,
+    get_source_summary,
     list_sources,
     search,
     stats,
@@ -108,6 +109,18 @@ def _build_server():
         """List every source video in the catalog with extract/clip counts."""
         with _conn() as conn:
             return list_sources(conn)
+
+    @server.tool()
+    def catalog_get_summary(source_id: int) -> dict[str, Any] | None:
+        """Whole-film story spine for a source, if one was generated at extract.
+
+        Returns {synopsis, themes, tone, characters:[{name, role}],
+        beats:[{title, start, end, summary}], generated_by} — use this to anchor
+        a full-arc recap (chapter on the beats, name characters consistently).
+        Returns None when the source has no stored summary.
+        """
+        with _conn() as conn:
+            return get_source_summary(conn, source_id)
 
     @server.tool()
     def catalog_stats() -> dict[str, Any]:

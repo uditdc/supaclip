@@ -261,6 +261,26 @@ def get_source(conn: sqlite3.Connection, source_id: int) -> dict[str, Any] | Non
     return dict(row)
 
 
+def get_source_summary(conn: sqlite3.Connection, source_id: int) -> dict[str, Any] | None:
+    """Return the stored whole-film summary (synopsis/themes/tone/characters/beats)."""
+    row = conn.execute(
+        """SELECT synopsis, themes_json, tone, characters_json, beats_json, generated_by
+           FROM source_summaries WHERE source_id = ?""",
+        (source_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "source_id": source_id,
+        "synopsis": row["synopsis"],
+        "themes": json.loads(row["themes_json"] or "[]"),
+        "tone": row["tone"],
+        "characters": json.loads(row["characters_json"] or "[]"),
+        "beats": json.loads(row["beats_json"] or "[]"),
+        "generated_by": row["generated_by"],
+    }
+
+
 def stats(conn: sqlite3.Connection) -> dict[str, int]:
     out = {}
     for table in ("sources", "extracts", "clips", "clip_categories"):

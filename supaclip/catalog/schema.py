@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 CLIPS_FTS_DDL = """
 CREATE VIRTUAL TABLE IF NOT EXISTS clips_fts USING fts5(
@@ -71,6 +71,16 @@ CREATE TABLE IF NOT EXISTS clip_categories (
     PRIMARY KEY (clip_id, category)
 );
 CREATE INDEX IF NOT EXISTS idx_clip_categories_category ON clip_categories(category);
+
+CREATE TABLE IF NOT EXISTS source_summaries (
+    source_id       INTEGER PRIMARY KEY REFERENCES sources(id) ON DELETE CASCADE,
+    synopsis        TEXT NOT NULL DEFAULT '',
+    themes_json     TEXT NOT NULL DEFAULT '[]',
+    tone            TEXT NOT NULL DEFAULT '',
+    characters_json TEXT NOT NULL DEFAULT '[]',
+    beats_json      TEXT NOT NULL DEFAULT '[]',
+    generated_by    TEXT NOT NULL DEFAULT ''
+);
 """ + CLIPS_FTS_DDL
 
 

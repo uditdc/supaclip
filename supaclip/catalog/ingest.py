@@ -113,6 +113,9 @@ def _ingest_one(
     for clip in manifest.clips:
         _insert_clip(cur, extract_id, clip)
 
+    if manifest.summary is not None:
+        _upsert_summary(cur, source_id, manifest.summary)
+
     conn.commit()
     return IngestResult(
         manifest_path=manifest_path,
@@ -163,6 +166,24 @@ def _upsert_source(conn: sqlite3.Connection, manifest: Manifest) -> int:
         ),
     )
     return cur.lastrowid
+
+
+def _upsert_summary(cur: sqlite3.Cursor, source_id: int, summary) -> None:
+    cur.execute(
+        """INSERT OR REPLACE INTO source_summaries
+           (source_id, synopsis, themes_json, tone, characters_json,
+            beats_json, generated_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            source_id,
+            summary.synopsis,
+            json.dumps(summary.themes),
+            summary.tone,
+            json.dumps([c.model_dump() for c in summary.characters]),
+            json.dumps([b.model_dump() for b in summary.beats]),
+            summary.generated_by,
+        ),
+    )
 
 
 def _delete_clips_for_extract(cur: sqlite3.Cursor, extract_id: int) -> None:

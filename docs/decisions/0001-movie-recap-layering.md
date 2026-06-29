@@ -38,13 +38,16 @@ not as a fork or a separate program (yet)**:
 ## Roadmap (phased; each phase independently useful)
 
 1. **Subtitle ingest + per-scene dialogue + FTS** (schema v2). — *done*
-2. **Source synopsis/theme/beat-sheet rollup + storage + MCP tool.**
-   Decision: produced *both* ways — the user may prime analysis with a
-   synopsis/cast up front (existing `VideoContext`), and an LLM rollup over the
-   ordered dialogue+descriptions generates the stored beat-sheet.
+   (see [0002](0002-subtitle-dialogue-ingestion.md))
+2. **Source synopsis/theme/beat-sheet rollup + storage + MCP tool.** — *done*
+   (see [0003](0003-source-summary-rollup.md)). Produced *both* ways — the user
+   may prime analysis with a synopsis/cast up front (existing `VideoContext`),
+   and an LLM rollup over the ordered dialogue+descriptions generates the stored
+   beat-sheet. The `movie-recap` skill now chapters on these beats.
 3. **Narrative scoring + beat-aware selection** (story-meaningful clip choice).
 4. **`movie-recap` skill v2** — map parts onto the beat-sheet, coverage- and
-   continuity-checked.
+   continuity-checked. (Beat-mapping landed early with Phase 2; coverage/
+   continuity verification still to harden.)
 
 ## Consequences
 

@@ -1,21 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from .backends._shared import _coerce, _parse_json
+from .llm import LLMConfig, call_json
 from .profiles import GameProfile
 
 PROMPT_VERSION = "agg-v3"
 MIN_CLIP_SECONDS = 10.0
 
-
-@dataclass
-class AggregateConfig:
-    model: str
-    base_url: str
-    api_key: str | None
-    provider: str = "openai"  # "openai" (OpenAI-compat) or "google" (AI Studio)
+AggregateConfig = LLMConfig
 
 
 def aggregate_events(
@@ -111,51 +105,7 @@ def _enforce_min_duration(
 
 
 def _call(prompt: str, cfg: AggregateConfig) -> str:
-    if cfg.provider == "google":
-        return _call_google(prompt, cfg)
-    return _call_openai(prompt, cfg)
-
-
-def _call_openai(prompt: str, cfg: AggregateConfig) -> str:
-    from openai import OpenAI
-
-    client = OpenAI(base_url=cfg.base_url, api_key=cfg.api_key or "ollama")
-    resp = client.chat.completions.create(
-        model=cfg.model,
-        messages=[
-            {"role": "system", "content": "You are a careful video editor. Reply with JSON only."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.2,
-    )
-    return resp.choices[0].message.content or ""
-
-
-def _call_google(prompt: str, cfg: AggregateConfig) -> str:
-    from google import genai
-    from google.genai import types
-
-    client = genai.Client(api_key=cfg.api_key)
-    resp = client.models.generate_content(
-        model=_normalize_google_model(cfg.model),
-        contents=[
-            "You are a careful video editor. Reply with JSON only.\n\n" + prompt,
-        ],
-        config=types.GenerateContentConfig(
-            temperature=0.2,
-            response_mime_type="application/json",
-        ),
-    )
-    return getattr(resp, "text", "") or ""
-
-
-def _normalize_google_model(model: str) -> str:
-    m = (model or "").strip()
-    if m.startswith("google/"):
-        m = m[len("google/"):]
-    if m.endswith(":free"):
-        m = m[: -len(":free")]
-    return m or "gemini-2.0-flash"
+    return call_json(prompt, cfg)
 
 
 def _build_prompt(

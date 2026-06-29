@@ -14,6 +14,7 @@ from supaclip.catalog.schema import SCHEMA_VERSION, migrate
 from supaclip.catalog.search import (
     get_clip,
     get_source,
+    get_source_summary,
     list_sources,
     parse_signal_filter,
     search,
@@ -21,10 +22,14 @@ from supaclip.catalog.search import (
 )
 from supaclip.core.manifest import (
     AudioInfo,
+    CharacterRole,
     Clip,
     ExtractInfo,
     Manifest,
     SourceInfo,
+    SourceSummary,
+    StoryBeat,
+    load_manifest,
     now_iso,
     save_manifest,
 )
@@ -379,6 +384,46 @@ def test_dialogue_stored_and_searchable(tmp_path: Path):
     # and indexed: a word only present in the dialogue is findable by FTS
     hits = search(conn, query="antidote")
     assert len(hits) == 1 and hits[0].clip_local_id == "clip_01"
+    conn.close()
+
+
+def test_source_summary_round_trip(tmp_path: Path):
+    source = tmp_path / "film.mp4"
+    source.write_bytes(b"FAKE")
+    summary = SourceSummary(
+        synopsis="A chemist races to cure a plague.",
+        themes=["sacrifice"],
+        tone="tense thriller",
+        characters=[CharacterRole(name="Dr. Vance", role="protagonist")],
+        beats=[StoryBeat(title="Outbreak", start=0.0, end=60.0, summary="The plague spreads.")],
+        generated_by="test-model",
+    )
+    clip = Clip(
+        id="clip_01", file="clip_01.mp4", source_in=0.0, source_out=12.0, duration=12.0,
+        resolution="1920x1080", fps=24.0, description="A lab at night.",
+        categories=["establishing"], score=50,
+        audio=AudioInfo(), keyframes=[], segment_source="scene",
+    )
+    manifest = Manifest(
+        source=SourceInfo(file=str(source), duration=120.0, resolution="1920x1080", fps=24.0),
+        extract=ExtractInfo(segmenter="scene", analyzer="frames", game_profile="movie",
+                            created_at=now_iso()),
+        taxonomy=["establishing"], clips=[clip], summary=summary,
+    )
+    mpath = tmp_path / "manifest.json"
+    save_manifest(manifest, mpath)
+    # summary survives a manifest save/load cycle
+    assert load_manifest(mpath).summary.synopsis == summary.synopsis
+
+    conn = connect(tmp_path / "c.db")
+    add_manifest(conn, mpath)
+    src_id = list_sources(conn)[0]["id"]
+    got = get_source_summary(conn, src_id)
+    assert got["synopsis"] == "A chemist races to cure a plague."
+    assert got["themes"] == ["sacrifice"]
+    assert got["characters"] == [{"name": "Dr. Vance", "role": "protagonist"}]
+    assert got["beats"][0]["title"] == "Outbreak"
+    assert get_source_summary(conn, 999) is None
     conn.close()
 
 

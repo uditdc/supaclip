@@ -65,7 +65,9 @@ supaclip/
 │   ├── chunking.py            audio-trough chunking within a segment
 │   ├── audio.py               loudness peaks + per-range audio factor
 │   ├── analyze.py             SegmentEvent / SegmentAnalysis types + backend factory
+│   ├── llm.py                 shared text-LLM transport (LLMConfig + call_json)
 │   ├── aggregate.py           final dedup/merge pass over events (LLM call)
+│   ├── summarize.py           whole-source rollup: synopsis/theme/characters/beats (LLM call)
 │   ├── dedupe.py              IoU-based temporal merge of candidate ranges
 │   ├── backends/
 │   │   ├── _shared.py         JSON parsing + event coercion helpers
@@ -123,6 +125,7 @@ Per video, `_run_one()` walks these stages:
 | Dedup         | `extract/dedupe.py`             | n/a (deterministic)                       |
 | Analyse       | `extract/analyze.py` + backends | yes per-chunk (`analysis`/fingerprint+chunk+prompt_version) |
 | Aggregate     | `extract/aggregate.py`          | yes (`aggregate`/fingerprint+event-signature) |
+| Summarize     | `extract/summarize.py`          | yes (`summary`/fingerprint+clip-signature) |
 | Write manifest| `core/manifest.py: save_manifest` | n/a                                     |
 
 Everything cacheable goes through `core.cache.Cache`, keyed by a file
@@ -199,6 +202,24 @@ failure the input event list is returned unchanged so the pipeline always
 produces output. Finally `_enforce_min_duration()` extends or drops events
 shorter than `MIN_CLIP_SECONDS` (10s).
 
+Both the aggregate and summarize passes send a text prompt to whichever
+provider the analyzer uses and expect JSON back; that transport lives in
+`extract/llm.py` (`LLMConfig` + `call_json`, OpenAI-compat or Google AI Studio).
+
+### 3.5.1 Summarize (whole-source rollup)
+
+After clips are built, `extract/summarize.py: summarize_source` runs one more
+text-only pass over the final scenes — in story order, **with each scene's
+dialogue** — and returns a `SourceSummary`: a 150–250 word synopsis, themes,
+tone, a principal-character list (`name`/`role`), and a contiguous `beats`
+list (act/location spans) covering the runtime. Any user-supplied
+`VideoContext` (an up-front synopsis + cast via `--video-intro`/`--context-file`)
+primes the prompt as authoritative; the model fills in and structures the rest.
+The result is the "story spine" the movie-recap skill chapters on. Best-effort:
+any failure yields `None` and the manifest simply has no summary. Cached in the
+`summary` bucket (fingerprint + analyzer + model + profile + prompt version +
+context fingerprint + clip signature); skip with `--no-summary`.
+
 ### 3.6 Manifest
 
 For each surviving event, `_run_one` extracts `--keyframes N` JPEGs at evenly
@@ -216,10 +237,14 @@ clips [
     audio { peak_loudness_db, cues },
     keyframes [...], segment_source }
 ]
+summary? { synopsis, themes[], tone, characters[{name, role}],
+           beats[{title, start, end, summary}], generated_by }
 ```
 
-`Clip.dialogue` (added in manifest `SCHEMA_VERSION = 2`) holds the spoken lines
-for the clip's time window, or `""` when no subtitles were ingested.
+`Clip.dialogue` (manifest `SCHEMA_VERSION = 2`) holds the spoken lines for the
+clip's time window, or `""` when no subtitles were ingested. The optional
+top-level `summary` block (`SCHEMA_VERSION = 3`) is the whole-source rollup from
+§3.5.1, or absent when `--no-summary` was set or the pass yielded nothing.
 
 `Clip.file` is stored relative to the manifest dir when the source lives
 under it, otherwise absolute. The manifest is the deliverable of Phase 1 —
@@ -237,6 +262,8 @@ A single SQLite DB at `~/.local/share/supaclip/catalog.db` (overridable via
 - `clips` (clip rows; FK → extracts; stores `dialogue` plus
   game_signals/audio/keyframes as JSON),
 - `clip_categories` (M:N category index),
+- `source_summaries` (one row per source: synopsis/themes/tone/characters/beats
+  as columns + JSON; upserted from a manifest's `summary`),
 - `clips_fts` (FTS5 virtual table over `description`, `dialogue`, `audio_cues`,
   `tags`).
 
@@ -272,7 +299,9 @@ location.
 FastMCP. Tools:
 
 - `catalog_search`, `catalog_get_clip`, `catalog_get_source`,
-  `catalog_list_sources`, `catalog_stats` — wrappers around `search.py`.
+  `catalog_list_sources`, `catalog_stats`, `catalog_get_summary` — wrappers
+  around `search.py`. `catalog_get_summary(source_id)` returns the stored
+  story spine (synopsis/themes/tone/characters/beats) or null.
 - `get_clip_preview` — compact dict tailored for EDL composition (only the
   fields Claude needs to pick a clip and set `source_in`).
 - `validate_edl` — runs `core.edl.validate_edl` with a catalog-backed
@@ -417,10 +446,11 @@ long renders can stream `pct / speed / fps` events.
 
 Three independent versioned formats:
 
-- `core/manifest.py: SCHEMA_VERSION = 2` — bumped when `Manifest` changes
-  (v2 added `Clip.dialogue`).
-- `catalog/schema.py: SCHEMA_VERSION = 2` — the SQLite DDL; `migrate()` carries
-  forward older catalogs (v2 added `clips.dialogue` + an FTS column).
+- `core/manifest.py: SCHEMA_VERSION = 3` — bumped when `Manifest` changes
+  (v2 added `Clip.dialogue`; v3 added the top-level `summary` block).
+- `catalog/schema.py: SCHEMA_VERSION = 3` — the SQLite DDL; `migrate()` carries
+  forward older catalogs (v2 added `clips.dialogue` + an FTS column; v3 added
+  the `source_summaries` table).
 - `core/edl.py: EDL_SCHEMA_VERSION = 1` — bumped when EDL changes; the
   validator flags mismatched versions.
 

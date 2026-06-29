@@ -19,6 +19,7 @@ from ..core.manifest import (
     ExtractInfo,
     Manifest,
     SourceInfo,
+    SourceSummary,
     now_iso,
     save_manifest,
 )
@@ -44,6 +45,8 @@ from .segment import (
     scene_segments,
 )
 from .subtitles import SubtitleCue, dialogue_for_range, load_for_video
+from .summarize import PROMPT_VERSION as SUM_PROMPT_VERSION
+from .summarize import summarize_source
 
 
 @dataclass
@@ -73,6 +76,7 @@ class ExtractConfig:
     context: VideoContext | None = None
     subtitles: str | None = None
     no_subtitles: bool = False
+    no_summary: bool = False
 
 
 def run(cfg: ExtractConfig, log: Logger) -> list[Manifest]:
@@ -285,6 +289,8 @@ def _run_one(
             segment_source=cfg.segmenter,
         ))
 
+    summary = _summarize(clips, cfg, profile, info, fingerprint, ctx_fp, cache, log)
+
     manifest = Manifest(
         source=SourceInfo(
             file=info.path,
@@ -300,6 +306,7 @@ def _run_one(
         ),
         taxonomy=list(profile.taxonomy),
         clips=clips,
+        summary=summary,
     )
     manifest_path = output_dir / "manifest.json"
     save_manifest(manifest, manifest_path)
@@ -382,6 +389,54 @@ def _is_inside(path: Path, base: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _summarize(
+    clips: list[Clip],
+    cfg: ExtractConfig,
+    profile: GameProfile,
+    info: VideoInfo,
+    fingerprint: str,
+    ctx_fp: str,
+    cache: Cache,
+    log: Logger,
+) -> SourceSummary | None:
+    if cfg.no_summary or len(clips) < 2:
+        return None
+
+    log.stage("Summarize")
+    events = [
+        {
+            "start": c.source_in,
+            "end": c.source_out,
+            "description": c.description,
+            "dialogue": c.dialogue,
+        }
+        for c in clips
+    ]
+    signature = tuple((round(c.source_in, 1), round(c.source_out, 1)) for c in clips)
+    key = (
+        fingerprint, cfg.analyzer, cfg.llm, profile.name,
+        SUM_PROMPT_VERSION, ctx_fp, len(clips), signature,
+    )
+    cached = cache.get("summary", key)
+    if cached is not None:
+        log.detail("summary cache hit")
+        return SourceSummary.model_validate(cached)
+
+    summary = summarize_source(
+        events,
+        source_duration=info.duration,
+        profile=profile,
+        cfg=_build_agg_config(cfg),
+        context=cfg.context,
+    )
+    if summary is None:
+        log.warn("summary pass produced nothing; manifest will have no summary")
+        return None
+    cache.set("summary", key, summary.model_dump(mode="json"))
+    log.success(f"synopsis + {len(summary.beats)} beats, {len(summary.characters)} characters")
+    return summary
 
 
 def _build_agg_config(cfg: ExtractConfig) -> AggregateConfig:

@@ -62,6 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
                         "next to the video, then an embedded subtitle stream")
     p.add_argument("--no-subtitles", action="store_true",
                    help="skip subtitle ingestion (descriptions will be vision-only)")
+    p.add_argument("--no-summary", action="store_true",
+                   help="skip the whole-source synopsis/theme/beat-sheet rollup pass")
     p.add_argument("--keyframes", type=int, default=3)
     p.add_argument("--dedup-iou", type=float, default=0.6)
     p.add_argument("--no-dedup", action="store_true")
@@ -220,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         context=context,
         subtitles=args.subtitles,
         no_subtitles=args.no_subtitles,
+        no_summary=args.no_summary,
     )
 
     try:

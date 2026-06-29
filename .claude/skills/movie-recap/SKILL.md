@@ -44,26 +44,35 @@ unrecoverable error.**
    use it. If the user named a title, match it against `file_path`. If still
    ambiguous (multiple sources, no clear match), ask **once** which source id
    to recap — this is the one legitimate stop.
-3. **Pull the whole film in story order:**
+3. **Load the story spine.** `catalog_get_summary(source_id)` → the
+   whole-film `{synopsis, themes, tone, characters, beats}` generated at
+   extract. This is your anchor: characters give you consistent names, `beats`
+   give you the act structure to chapter on, and `synopsis`/`themes` keep every
+   part's narration on-message. If it returns `null` (no summary was
+   generated), fall back to inferring structure from the ordered scenes.
+4. **Pull the whole film in story order:**
    `catalog_search(source="<file_path or fingerprint>", order_by="timeline",
    limit=500)`. This returns every scene sorted by `source_in` ascending —
    the film start-to-finish. (`order_by="timeline"` is the chronological
    ordering; do not use `score` here or you'll get the plot out of order.)
    If you get exactly `limit` rows, raise `limit` and re-query — you may have
    truncated a scene-heavy film.
-4. **Decide the part count `N`.** Honor the user's number if given. Otherwise
+5. **Decide the part count `N`.** Honor the user's number if given. Otherwise
    target ~60s parts covering the whole film: `N ≈ round(film_minutes / 10)`,
    clamped to `[8, 15]`. Source runtime is `catalog_get_source(source_id).duration`.
-5. **Chapter the scenes.** Split the ordered scene list into `N` **contiguous,
-   non-overlapping** chapters by `source_in`, each spanning a comparable slice
-   of runtime AND ending on a natural beat (a location/act change in the
-   descriptions — don't cut mid-confrontation). Every scene belongs to exactly
+6. **Chapter the scenes — map parts onto beats, not the clock.** When a
+   summary exists, group the `beats` into `N` contiguous part-spans and assign
+   each scene to the part whose time span contains its `source_in`. This
+   guarantees the whole arc is covered with no plot gaps and that parts break on
+   real act transitions. Without a summary, fall back to `N` contiguous,
+   comparable-length slices that end on a location/act change in the
+   descriptions (don't cut mid-confrontation). Every scene belongs to exactly
    one chapter; chapters stay in order. Each chapter is one short.
-6. **For each chapter, in order, build and render its short** (sub-pipeline
+7. **For each chapter, in order, build and render its short** (sub-pipeline
    below). Carry a one-paragraph running plot memory between chapters so
    narration has continuity (callbacks, "now that X has happened…") and never
    re-explains earlier parts.
-7. **Series summary** at the end (format under "Reporting style").
+8. **Series summary** at the end (format under "Reporting style").
 
 ## Per-chapter sub-pipeline
 
@@ -75,6 +84,10 @@ For chapter `k` of `N`, covering scenes `S` (a chronological slice):
    plot in the `dialogue` — it's the real storyline; descriptions are only the
    visuals. If `dialogue` is empty across the film, fall back to descriptions
    and tell the user the recap is visual-only (no subtitles were ingested).
+   Name characters using the spine's `characters` list (consistent across all
+   parts — never invent names), and keep the part on-message with the spine's
+   `themes`. Use this beat's `summary` from the spine as the skeleton, then
+   enrich it with specifics from the scenes' dialogue.
    - It is a **plot recap of this slice**, in present tense, third person,
      spoken aloud. Tell what happens — don't describe shots ("we see a man") ;
      narrate events ("Cooper leaves his daughter behind to save humanity").
@@ -170,7 +183,8 @@ audio bed; set the single `voiceover` audio cue spanning the whole short.
 
 ## Recovery patterns (`validate_edl` errors)
 
-- **`clip_id=X not found`** → re-query step 3; you used a stale/hallucinated id.
+- **`clip_id=X not found`** → re-query the timeline pull; you used a
+  stale/hallucinated id.
 - **`cue duration exceeds available clip footage`** → shorten the cue or pick a
   later `source_in`; if impossible, drop to a neighboring scene in the chapter.
 - **`gap in video track`** → extend the adjacent cue's `end` (the scene
@@ -186,6 +200,10 @@ audio bed; set the single `voiceover` audio cue spanning the whole short.
 - `catalog_stats()` → `{clips, sources, ...}`. Run first.
 - `catalog_list_sources()` → sources with `id`, `file_path`, `clip_count`.
 - `catalog_get_source(source_id)` → `{duration, resolution, fps, ...}`.
+- `catalog_get_summary(source_id)` → `{synopsis, themes, tone, characters:
+  [{name, role}], beats:[{title, start, end, summary}], generated_by}` or
+  `null`. The story spine — load it first to chapter on beats and name
+  characters consistently.
 - `catalog_search(source?, order_by="timeline", limit?, query?, categories?, min_score?, ...)`
   → clip dicts in `source_in` order when `order_by="timeline"`.
 - `get_clip_preview(clip_id)` → `{description, dialogue, duration, source_in,
@@ -213,13 +231,16 @@ You:
 1. `catalog_stats` → 1 source, 240 clips, OK.
 2. `catalog_list_sources` → source_id 1, the only film. `catalog_get_source(1)`
    → duration 7080s.
-3. `catalog_search(source="<path>", order_by="timeline", limit=500)` → 240
+3. `catalog_get_summary(1)` → synopsis, 4 themes, 11 named characters, 14 beats.
+4. `catalog_search(source="<path>", order_by="timeline", limit=500)` → 240
    scenes in story order.
-4. `N = round(118/10) = 12`, in `[8,15]` → 12 parts.
-5. Chapter the 240 scenes into 12 contiguous slices on act/location beats.
-6. Part 1: write ~150-word hooked opening recap of scenes 1–18 → duration 60s;
-   establishing chapter → 5 cues of ~12s; OST "PART 1 / 12" + title; captions on;
-   validate → ok; `render_edl(... part01.mp4)` → ok.
+5. `N = round(118/10) = 12`, in `[8,15]` → 12 parts; group the 14 beats into 12
+   contiguous part-spans and assign each of the 240 scenes to the span over its
+   `source_in`.
+6. Part 1: write ~150-word hooked opening recap of scenes 1–18 grounded in their
+   dialogue, names from the spine → duration 60s; establishing chapter → 5 cues
+   of ~12s; OST "PART 1 / 12" + title; captions on; validate → ok;
+   `render_edl(... part01.mp4)` → ok.
    … repeat parts 2–12, carrying plot memory; action chapters get 7–9 short cuts,
    dialogue chapters 4–5 long holds …
 7. Print the 12-path series summary.
