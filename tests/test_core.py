@@ -317,3 +317,33 @@ def test_help_is_fast():
     )
     assert res.returncode == 0
     assert "extract" in res.stdout
+
+
+# ---------------------- ffmpeg probe helpers ----------------------
+
+def _make_clip(path: Path, seconds: int = 2) -> None:
+    subprocess.run(
+        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+         "-f", "lavfi", "-i", f"color=c=blue:s=320x240:r=24:d={seconds}",
+         "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
+         "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+         "-t", str(seconds), str(path)],
+        check=True, capture_output=True,
+    )
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_segment_decodes_clean_true_for_valid_clip(tmp_path: Path):
+    from supaclip.core.ffmpeg import segment_decodes_clean
+    clip = tmp_path / "clip.mp4"
+    _make_clip(clip)
+    assert segment_decodes_clean(clip, 0.0, 2.0) is True
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_measure_peak_db_returns_float_for_audio(tmp_path: Path):
+    from supaclip.core.ffmpeg import measure_peak_db
+    clip = tmp_path / "clip.mp4"
+    _make_clip(clip)
+    peak = measure_peak_db(clip, 0.0, 2.0)
+    assert peak is not None and -60.0 <= peak <= 0.0

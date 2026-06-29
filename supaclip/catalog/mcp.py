@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ..core.ffmpeg import measure_peak_db, segment_decodes_clean
+from ..extract.subtitles import cues_for_range, load_for_video
 from .db import connect
 from .paths import resolve_catalog_path
 from .search import (
@@ -129,6 +131,52 @@ def _build_server():
             s = stats(conn)
         size = catalog_path.stat().st_size if catalog_path.exists() else 0
         return {"catalog": str(catalog_path), "size_bytes": size, **s}
+
+    @server.tool()
+    def probe_clip(clip_id: int, max_seconds: float = 60.0) -> dict[str, Any] | None:
+        """Pre-flight a clip's media before using it in an EDL.
+
+        Real-world movie rips have corrupt H.264/AAC regions that decode
+        tolerantly but abort a render. Returns `decodes_clean` (skip the clip
+        if false — pick another in the same beat) and `peak_db` (to set a
+        constant audio gain, e.g. level_db = target_peak - peak_db). Probes the
+        first `max_seconds` of the clip.
+        """
+        with _conn() as conn:
+            row = get_clip(conn, clip_id)
+            if row is None:
+                return None
+            probe_dur = min(float(row.duration), float(max_seconds))
+            return {
+                "clip_id": row.clip_id,
+                "source_in": row.source_in,
+                "duration": row.duration,
+                "probe_seconds": round(probe_dur, 3),
+                "decodes_clean": segment_decodes_clean(row.file, row.source_in, probe_dur),
+                "peak_db": measure_peak_db(row.file, row.source_in, probe_dur),
+            }
+
+    @server.tool()
+    def get_clip_subtitles(clip_id: int, max_seconds: float = 60.0) -> dict[str, Any] | None:
+        """The source film's own subtitle lines within a clip's window, re-timed
+        to clip-local coordinates (start 0).
+
+        Feed these into `EDLCaptions.cues` to burn the film's real dialogue,
+        synced, in our caption style (movie-clips). Empty `cues` if the source
+        has no subtitles.
+        """
+        with _conn() as conn:
+            row = get_clip(conn, clip_id)
+            if row is None:
+                return None
+            cues, source = load_for_video(row.file)
+            window = min(float(row.duration), float(max_seconds))
+            scoped = cues_for_range(cues, row.source_in, row.source_in + window)
+            return {
+                "clip_id": row.clip_id,
+                "source": source,
+                "cues": [{"start": c.start, "end": c.end, "text": c.text} for c in scoped],
+            }
 
     @server.tool()
     def get_clip_preview(clip_id: int) -> dict[str, Any] | None:

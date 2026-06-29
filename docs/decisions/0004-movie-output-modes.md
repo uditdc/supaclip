@@ -1,6 +1,6 @@
 # 0004 — Movie output modes: "movie recap" vs "movie clips"
 
-- **Status:** accepted (recap built; clips engine built)
+- **Status:** accepted (recap built; clips built — skill + core primitives)
 - **Date:** 2026-06-29 (updated 2026-06-30)
 - **Relates to:** [0001](0001-movie-recap-layering.md) (layering),
   [0003](0003-source-summary-rollup.md) (story spine).
@@ -55,9 +55,28 @@ burned in, styled like ours. No voiceover. The engine pieces added:
   ≤60s. Phase-3 narrative scoring will improve "interesting" later; score is a
   serviceable proxy now.
 
-Each clip is a single-video-cue EDL: `clip_audio` (normalized) + `captions.cues`
-from the source subtitles. Driven today by a generator script; a `movie-clips`
-skill + `supaclip clips` CLI are the natural app-layer wrappers.
+Each clip is a single-video-cue EDL: `clip_audio` (peak-normalized) +
+`captions.cues` from the source subtitles.
+
+**Upstreamed (2026-06-30) following the [0001](0001-movie-recap-layering.md)
+layering** — scout scripts (`clips/demo/build_clips.py`, `build_commentary.py`)
+were promoted by altitude, not wholesale:
+
+- **Core primitives** (general, reusable): `core/ffmpeg.py: segment_decodes_clean`
+  (corrupt-region pre-flight for real-world rips) and `measure_peak_db`
+  (constant-gain helper); `extract/subtitles.py: cues_for_range` (clip-local
+  timed source cues).
+- **MCP exposure** so the skill can reach them: `probe_clip` (decodes_clean +
+  peak_db) and `get_clip_subtitles` (timed clip-local source cues).
+- **App layer**: the `movie-clips` skill encodes the recipe (one clip per beat,
+  clean-clip selection via `probe_clip`, peak-gain audio, source-subtitle or
+  commentary captions, watermark) with a `--commentary` mode. The commentary
+  *narration* is LLM-authored — which is precisely why this is a skill, not a
+  CLI. Selection policy, caption style, duck levels, and watermark are skill
+  defaults, not core.
+
+A headless `supaclip clips` CLI could still wrap the deterministic plain mode
+later; commentary stays skill-only (needs the LLM).
 
 ## Open questions (deferred)
 

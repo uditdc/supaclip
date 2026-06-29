@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from supaclip.extract.subtitles import (
+    cues_for_range,
     dialogue_for_range,
     find_sidecar,
     load_for_video,
@@ -85,6 +86,16 @@ def test_dialogue_for_range_overlap():
     assert joined.startswith("Hello there.") and "General Kenobi" in joined
     # gap with no dialogue
     assert dialogue_for_range(cues, 4.2, 5.2) == ""
+
+
+def test_cues_for_range_offsets_and_clamps():
+    cues = parse_subtitles(SRT)  # cue1 [1-4], cue2 [5.5-8]
+    # window 3..7 -> cues re-timed to clip-local, clamped to [0, 4]
+    out = cues_for_range(cues, 3.0, 7.0)
+    assert [(c.start, c.end) for c in out] == [(0.0, 1.0), (2.5, 4.0)]
+    assert out[0].text == "Hello there."
+    # window with no overlap
+    assert cues_for_range(cues, 8.5, 10.0) == []
 
 
 def test_find_sidecar_prefers_exact_stem(tmp_path: Path):

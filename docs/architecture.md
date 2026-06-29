@@ -50,7 +50,7 @@ supaclip/
 ├── __init__.py                version
 ├── cli.py                     umbrella dispatcher
 ├── core/                      shared, pipeline-agnostic primitives
-│   ├── ffmpeg.py              probe / loudness / keyframes / subtitle extract / run_ffmpeg / cut
+│   ├── ffmpeg.py              probe / loudness / keyframes / subtitle extract / decode-clean + peak probe / cut
 │   ├── manifest.py            Pydantic models: Manifest, Clip, SourceInfo
 │   ├── edl.py                 Pydantic models + validate_edl()
 │   ├── cache.py               file-fingerprint keyed JSON cache
@@ -313,19 +313,30 @@ FastMCP. Tools:
   story spine (synopsis/themes/tone/characters/beats) or null.
 - `get_clip_preview` — compact dict tailored for EDL composition (only the
   fields Claude needs to pick a clip and set `source_in`).
+- `probe_clip` — pre-flights a clip's media (`segment_decodes_clean` +
+  `measure_peak_db` from `core/ffmpeg.py`): returns `decodes_clean` (skip
+  corrupt real-world-rip regions before they abort a render) and `peak_db` (to
+  set a constant audio gain). Used by the movie-clips skill for selection.
+- `get_clip_subtitles` — the source film's own subtitle lines within a clip's
+  window, re-timed to clip-local coords (`subtitles.cues_for_range`), for
+  burning the film's dialogue as styled `EDLCaptions.cues`.
 - `validate_edl` — runs `core.edl.validate_edl` with a catalog-backed
   resolver. Returns `{ok, issues}`.
 - `render_edl` — invokes `stitch.render.render()`. Spends ElevenLabs credits
   on first call for a given `(text, voice, settings)` tuple; subsequent calls
   hit the TTS cache.
 
-Two Claude Code skills drive these tools end-to-end without user confirmation
+Three Claude Code skills drive these tools end-to-end without user confirmation
 between steps. `.claude/skills/stitch-director/` composes a *single* short from
 a user-supplied script (`catalog_search → get_clip_preview → validate_edl →
 render_edl`). `.claude/skills/movie-recap/` turns a whole film into a *series*
 of chronological recap shorts: it pulls the film's scenes via
 `catalog_search(order_by="timeline")`, chapters them, generates the narration
 from each chapter's descriptions + dialogue, and renders one short per chapter.
+`.claude/skills/movie-clips/` produces standalone highlight clips — one 30-60s
+short per beat with the film's original audio and its own subtitles styled
+(via `probe_clip` for clean selection + audio gain and `get_clip_subtitles` for
+captions); an optional `--commentary` mode adds a TTS take over ducked audio.
 
 ## 5. Phase 2 / 2.5 — Stitch
 

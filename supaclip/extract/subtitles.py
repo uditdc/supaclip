@@ -127,3 +127,21 @@ def dialogue_for_range(cues: list[SubtitleCue], start: float, end: float) -> str
     """Concatenate the dialogue of every cue overlapping [start, end)."""
     spoken = [c.text for c in cues if c.start < end and c.end > start]
     return _WS.sub(" ", " ".join(spoken)).strip()
+
+
+def cues_for_range(cues: list[SubtitleCue], start: float, end: float) -> list[SubtitleCue]:
+    """Cues overlapping [start, end), re-timed to clip-local coordinates.
+
+    Unlike dialogue_for_range (which concatenates text), this preserves each
+    cue's timing shifted so the window starts at 0 — for burning the source
+    film's own subtitles, synced, over a clip.
+    """
+    out: list[SubtitleCue] = []
+    for c in cues:
+        if c.start < end and c.end > start:
+            out.append(SubtitleCue(
+                start=round(max(0.0, c.start - start), 3),
+                end=round(min(end - start, c.end - start), 3),
+                text=c.text,
+            ))
+    return out
