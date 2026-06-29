@@ -19,7 +19,7 @@ _T = TypeVar("_T")
 
 
 def retry_call(
-    fn: Callable[[], _T], *, attempts: int = 4, base_delay: float = 2.0, label: str = "llm"
+    fn: Callable[[], _T], *, attempts: int = 6, base_delay: float = 2.0, label: str = "llm"
 ) -> _T:
     """Call `fn`, retrying transient failures with exponential backoff.
 

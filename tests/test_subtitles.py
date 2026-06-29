@@ -48,6 +48,34 @@ def test_parse_vtt_handles_header_notes_and_short_timestamps():
     assert cues[1].text == "Second line here."
 
 
+def test_parse_tolerates_stray_control_chars_in_timecodes():
+    # real-world SRTs sometimes carry stray control bytes; a bad block must be
+    # skipped (or recovered) rather than crash the whole parse.
+    messy = (
+        "1\n00:00:01,000 --> 00:00:03,000\nClean line.\n\n"
+        "2\n\x1000:00:04,000 --> 00:00:06,000\nLine after a control byte.\n\n"
+        "3\nnot a timecode at all\nignored.\n\n"
+        "4\n00:00:07,000 --> 00:00:09,000\nLast line.\n"
+    )
+    cues = parse_subtitles(messy)
+    texts = [c.text for c in cues]
+    assert "Clean line." in texts
+    assert "Last line." in texts
+    # the control-byte block is still recovered (regex captures the clean stamps)
+    assert any(c.start == 4.0 and c.end == 6.0 for c in cues)
+
+
+def test_parse_drops_absurdly_long_cues():
+    # a corrupted block can merge two cues into one spanning minutes; drop it
+    # so its text can't bleed dialogue across unrelated scenes.
+    s = (
+        "1\n00:00:01,000 --> 00:00:03,000\nReal cue.\n\n"
+        "2\n00:07:36,000 --> 01:07:39,000\nMerged garbage spanning an hour.\n"
+    )
+    cues = parse_subtitles(s)
+    assert [c.text for c in cues] == ["Real cue."]
+
+
 def test_dialogue_for_range_overlap():
     cues = parse_subtitles(SRT)
     # window touching only the second cue

@@ -16,9 +16,8 @@ from pathlib import Path
 from ..core.ffmpeg import extract_subtitle_text
 
 _SIDECAR_EXTS = (".srt", ".vtt")
-_TIMECODE = re.compile(
-    r"(\d{1,2}:)?\d{1,2}:\d{2}[.,]\d{1,3}\s*-->\s*(\d{1,2}:)?\d{1,2}:\d{2}[.,]\d{1,3}"
-)
+_MAX_CUE_SECONDS = 30.0  # real subtitle cues are short; longer = a parse artifact
+_TIMESTAMP = re.compile(r"(?:(\d{1,2}):)?(\d{1,2}):(\d{2})[.,](\d{1,3})")
 _TAG = re.compile(r"<[^>]+>|\{[^}]*\}")
 _WS = re.compile(r"\s+")
 
@@ -30,13 +29,12 @@ class SubtitleCue:
     text: str
 
 
-def _to_seconds(stamp: str) -> float:
-    parts = stamp.strip().replace(",", ".").split(":")
-    parts = [float(p) for p in parts]
-    while len(parts) < 3:
-        parts.insert(0, 0.0)
-    h, m, s = parts[-3], parts[-2], parts[-1]
-    return h * 3600 + m * 60 + s
+def _stamp_seconds(m: re.Match) -> float:
+    h = int(m.group(1) or 0)
+    mins = int(m.group(2))
+    secs = int(m.group(3))
+    ms = int(m.group(4).ljust(3, "0")[:3])
+    return h * 3600 + mins * 60 + secs + ms / 1000.0
 
 
 def _clean(text: str) -> str:
@@ -46,7 +44,12 @@ def _clean(text: str) -> str:
 
 
 def parse_subtitles(content: str) -> list[SubtitleCue]:
-    """Parse SRT or WebVTT text into time-ordered cues. Tolerant of both formats."""
+    """Parse SRT or WebVTT text into time-ordered cues.
+
+    Tolerant of both formats and of messy real-world files: timecodes are
+    extracted by regex (so stray control bytes around them are ignored), and a
+    block that still won't parse is skipped rather than aborting the whole file.
+    """
     cues: list[SubtitleCue] = []
     blocks = re.split(r"\n\s*\n", content.replace("\r\n", "\n").replace("\r", "\n"))
     for block in blocks:
@@ -56,17 +59,23 @@ def parse_subtitles(content: str) -> list[SubtitleCue]:
         timing_idx = next((i for i, ln in enumerate(lines) if "-->" in ln), None)
         if timing_idx is None:
             continue
-        timing = lines[timing_idx]
-        if not _TIMECODE.search(timing):
+        stamps = list(_TIMESTAMP.finditer(lines[timing_idx]))
+        if len(stamps) < 2:
             continue
-        left, right = timing.split("-->", 1)
-        start = _to_seconds(left)
-        end = _to_seconds(right.split()[0] if right.split() else right)
+        try:
+            start = _stamp_seconds(stamps[0])
+            end = _stamp_seconds(stamps[1])
+        except (ValueError, IndexError):
+            continue
         text = _clean(" ".join(lines[timing_idx + 1:]))
-        if text and end > start:
+        if text and start < end <= start + _MAX_CUE_SECONDS:
             cues.append(SubtitleCue(start, end, text))
     cues.sort(key=lambda c: c.start)
     return cues
+
+
+def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8-sig", errors="replace")
 
 
 def find_sidecar(video_path: str | Path) -> Path | None:
@@ -97,11 +106,11 @@ def load_for_video(
         p = Path(explicit_path)
         if not p.is_file():
             raise FileNotFoundError(f"subtitle file not found: {p}")
-        return parse_subtitles(p.read_text(encoding="utf-8", errors="replace")), str(p)
+        return parse_subtitles(_read(p)), str(p)
 
     sidecar = find_sidecar(video_path)
     if sidecar is not None:
-        cues = parse_subtitles(sidecar.read_text(encoding="utf-8", errors="replace"))
+        cues = parse_subtitles(_read(sidecar))
         if cues:
             return cues, str(sidecar)
 
