@@ -45,6 +45,8 @@ not as a fork or a separate program (yet)**:
    and an LLM rollup over the ordered dialogue+descriptions generates the stored
    beat-sheet. The `movie-recap` skill now chapters on these beats.
 3. **Narrative scoring + beat-aware selection** (story-meaningful clip choice).
+   Shared dependency of both movie output modes — see
+   [0004](0004-movie-output-modes.md) (`movie recap` vs `movie clips`).
 4. **`movie-recap` skill v2** — map parts onto the beat-sheet, coverage- and
    continuity-checked. (Beat-mapping landed early with Phase 2; coverage/
    continuity verification still to harden.)
