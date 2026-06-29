@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ..analyze import SegmentAnalysis, SegmentEvent
+from ..llm import retry_call
 from ..profiles import GameProfile, VideoContext
 from ._shared import _coerce, _context_block, _parse_json, _signals_block, _taxonomy_str
 
@@ -151,15 +152,19 @@ class FramesBackend:
         })
 
         client = self._client()
-        resp = client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "You are a careful video analyst. Reply with JSON only."},
-                {"role": "user", "content": content},
-            ],
-            temperature=0.2,
-            extra_body={"reasoning": {"enabled": False}},
-        )
+
+        def _create():
+            return client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a careful video analyst. Reply with JSON only."},
+                    {"role": "user", "content": content},
+                ],
+                temperature=0.2,
+                extra_body={"reasoning": {"enabled": False}},
+            )
+
+        resp = retry_call(_create, label="frames")
         return resp.choices[0].message.content or ""
 
     def analyze_segment(

@@ -61,3 +61,32 @@ def test_summarize_none_on_call_failure(monkeypatch):
 def test_summarize_none_on_unparseable(monkeypatch):
     monkeypatch.setattr(summarize_mod, "call_json", lambda *a, **k: "sorry, no json")
     assert summarize_source(EVENTS, source_duration=90.0, profile=MOVIE_PROFILE, cfg=_cfg()) is None
+
+
+def test_summarize_hierarchical_for_long_films(monkeypatch):
+    # > WINDOW_SCENES events -> windowed summarize + reduce pass
+    n = summarize_mod.WINDOW_SCENES * 2
+    dur = float(n * 10)
+    events = [
+        {"start": i * 10.0, "end": i * 10.0 + 10.0,
+         "description": f"scene {i}", "dialogue": f"line {i}"}
+        for i in range(n)
+    ]
+
+    def fake_call(prompt, cfg, system=None):
+        if "CONTIGUOUS PORTION" in prompt:  # window pass
+            return ('{"synopsis": "a portion happens", '
+                    '"characters": [{"name": "Vance", "role": "lead"}], '
+                    '"beats": [{"title": "beat", "start": 0.0, "end": 30.0, "summary": "x"}]}')
+        if "combine them into one coherent" in prompt:  # reduce pass
+            return '{"synopsis": "the whole film in brief", "themes": ["survival"], "tone": "tense"}'
+        raise AssertionError("unexpected single-pass prompt for a long film")
+
+    monkeypatch.setattr(summarize_mod, "call_json", fake_call)
+    out = summarize_source(events, source_duration=dur, profile=MOVIE_PROFILE, cfg=_cfg())
+    assert out is not None
+    assert out.synopsis == "the whole film in brief"
+    assert out.themes == ["survival"]
+    # one beat per window (2 windows), characters de-duplicated to one "Vance"
+    assert len(out.beats) == 2
+    assert [c.name for c in out.characters] == ["Vance"]

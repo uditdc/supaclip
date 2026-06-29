@@ -7,9 +7,43 @@ place that knows how to talk to each provider.
 
 from __future__ import annotations
 
+import sys
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TypeVar
 
 _DEFAULT_SYSTEM = "You are a careful video editor. Reply with JSON only."
+
+_T = TypeVar("_T")
+
+
+def retry_call(
+    fn: Callable[[], _T], *, attempts: int = 4, base_delay: float = 2.0, label: str = "llm"
+) -> _T:
+    """Call `fn`, retrying transient failures with exponential backoff.
+
+    Free-tier endpoints return 429/5xx under load; without backoff a single
+    rate-limit aborts a hundreds-of-call extract. Retries every exception
+    (provider error types vary) up to `attempts`, then re-raises the last one.
+    """
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if i == attempts - 1:
+                break
+            delay = base_delay * (2**i)
+            print(
+                f"  [{label}] call failed ({type(e).__name__}); retry "
+                f"{i + 1}/{attempts - 1} in {delay:.0f}s",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+    assert last is not None
+    raise last
 
 
 @dataclass
@@ -21,9 +55,8 @@ class LLMConfig:
 
 
 def call_json(prompt: str, cfg: LLMConfig, *, system: str = _DEFAULT_SYSTEM) -> str:
-    if cfg.provider == "google":
-        return _call_google(prompt, cfg, system)
-    return _call_openai(prompt, cfg, system)
+    fn = _call_google if cfg.provider == "google" else _call_openai
+    return retry_call(lambda: fn(prompt, cfg, system), label=f"llm:{cfg.provider}")
 
 
 def _call_openai(prompt: str, cfg: LLMConfig, system: str) -> str:

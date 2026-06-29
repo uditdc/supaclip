@@ -195,10 +195,16 @@ def _run_one(
             futures = {pool.submit(_analyze, task): task for task in pending}
             for future in as_completed(futures):
                 task = futures[future]
-                payload = future.result()
+                done += 1
+                try:
+                    payload = future.result()
+                except Exception as e:  # noqa: BLE001
+                    log.warn(f"  [{done}/{len(pending)}] {task.cs:.1f}-{task.ce:.1f}s "
+                             f"failed ({type(e).__name__}); skipping, will retry on re-run")
+                    payloads[task.index] = []
+                    continue
                 cache.set("analysis", task.key, payload)
                 payloads[task.index] = payload
-                done += 1
                 log.detail(f"  [{done}/{len(pending)}] {task.cs:.1f}-{task.ce:.1f}s "
                            f"→ {len(payload)} events")
 

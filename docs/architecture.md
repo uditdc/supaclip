@@ -205,6 +205,11 @@ shorter than `MIN_CLIP_SECONDS` (10s).
 Both the aggregate and summarize passes send a text prompt to whichever
 provider the analyzer uses and expect JSON back; that transport lives in
 `extract/llm.py` (`LLMConfig` + `call_json`, OpenAI-compat or Google AI Studio).
+`call_json` and the `frames` vision call both go through `llm.retry_call`
+(exponential backoff), so a transient 429/5xx on a rate-limited endpoint backs
+off instead of aborting. If a per-chunk analysis still fails after retries, the
+pipeline logs it, treats the chunk as zero events, leaves it **uncached**, and
+continues — a re-run retries only the failed chunks.
 
 ### 3.5.1 Summarize (whole-source rollup)
 
@@ -212,7 +217,11 @@ After clips are built, `extract/summarize.py: summarize_source` runs one more
 text-only pass over the final scenes — in story order, **with each scene's
 dialogue** — and returns a `SourceSummary`: a 150–250 word synopsis, themes,
 tone, a principal-character list (`name`/`role`), and a contiguous `beats`
-list (act/location spans) covering the runtime. Any user-supplied
+list (act/location spans) covering the runtime. Short films are summarized in
+one call; films with more than `WINDOW_SCENES` (30) scenes are summarized
+**hierarchically** — scenes are split into windows, each window summarized, then
+a reduce pass writes the global synopsis from the window summaries — so a long
+film never overflows the model context. Any user-supplied
 `VideoContext` (an up-front synopsis + cast via `--video-intro`/`--context-file`)
 primes the prompt as authoritative; the model fills in and structures the rest.
 The result is the "story spine" the movie-recap skill chapters on. Best-effort:
