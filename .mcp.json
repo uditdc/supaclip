@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "supaclip": {
+      "command": ".venv/bin/python",
+      "args": ["-m", "supaclip.catalog.mcp"]
+    }
+  }
+}

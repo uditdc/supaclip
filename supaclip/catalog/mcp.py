@@ -301,7 +301,18 @@ def _build_server():
     return server
 
 
+def _load_dotenv_if_present() -> None:
+    try:
+        from dotenv import find_dotenv, load_dotenv
+    except ImportError:
+        return
+    path = find_dotenv(usecwd=True)
+    if path:
+        load_dotenv(path, override=False)
+
+
 def main(argv: list[str] | None = None) -> int:
+    _load_dotenv_if_present()
     try:
         server = _build_server()
     except SystemExit as e:
