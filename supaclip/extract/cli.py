@@ -57,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--llm", default=None, help="analyzer model id (default: env LLM_MODEL or gemma4)")
     p.add_argument("--base-url", default=None, help="OpenAI-compatible endpoint")
     p.add_argument("--api-key", default=None, help="API key (unused for local Ollama)")
+    p.add_argument("--subtitles", default=None,
+                   help="path to an .srt/.vtt file; default auto-detects a sidecar "
+                        "next to the video, then an embedded subtitle stream")
+    p.add_argument("--no-subtitles", action="store_true",
+                   help="skip subtitle ingestion (descriptions will be vision-only)")
     p.add_argument("--keyframes", type=int, default=3)
     p.add_argument("--dedup-iou", type=float, default=0.6)
     p.add_argument("--no-dedup", action="store_true")
@@ -213,6 +218,8 @@ def main(argv: list[str] | None = None) -> int:
         no_chunk=args.no_chunk,
         analyze_concurrency=args.analyze_concurrency,
         context=context,
+        subtitles=args.subtitles,
+        no_subtitles=args.no_subtitles,
     )
 
     try:

@@ -43,6 +43,7 @@ from .segment import (
     manual_segments,
     scene_segments,
 )
+from .subtitles import SubtitleCue, dialogue_for_range, load_for_video
 
 
 @dataclass
@@ -70,6 +71,8 @@ class ExtractConfig:
     no_chunk: bool = False
     analyze_concurrency: int = 4
     context: VideoContext | None = None
+    subtitles: str | None = None
+    no_subtitles: bool = False
 
 
 def run(cfg: ExtractConfig, log: Logger) -> list[Manifest]:
@@ -120,6 +123,15 @@ def _run_one(
     else:
         log.warn("source has no audio stream; skipping pre-pass")
         peaks = []
+
+    sub_cues: list[SubtitleCue] = []
+    if not cfg.no_subtitles:
+        log.stage("Subtitles")
+        sub_cues, sub_source = load_for_video(video_path, cfg.subtitles)
+        if sub_cues:
+            log.success(f"{len(sub_cues)} dialogue cues from {sub_source}")
+        else:
+            log.detail("no subtitles found; descriptions will be vision-only")
 
     log.stage(f"Segment ({cfg.segmenter})")
     seg_key = (fingerprint, cfg.segmenter, cfg.interval, cfg.min_clip, cfg.max_clip, "v2-trough")
@@ -260,6 +272,7 @@ def _run_one(
             resolution=info.resolution,
             fps=info.fps,
             description=str(ev.get("description") or ""),
+            dialogue=dialogue_for_range(sub_cues, ev_start_orig, ev_end_orig),
             categories=list(ev.get("categories") or []),
             score=score,
             game_signals=dict(ev.get("game_signals") or {}),

@@ -178,9 +178,9 @@ def _insert_clip(cur: sqlite3.Cursor, extract_id: int, clip: Clip) -> None:
     cur.execute(
         """INSERT INTO clips
            (extract_id, clip_local_id, file, source_in, source_out, duration,
-            resolution, fps, description, score, segment_source,
+            resolution, fps, description, dialogue, score, segment_source,
             game_signals_json, audio_json, keyframes_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             extract_id,
             clip.id,
@@ -191,6 +191,7 @@ def _insert_clip(cur: sqlite3.Cursor, extract_id: int, clip: Clip) -> None:
             clip.resolution,
             clip.fps,
             clip.description,
+            clip.dialogue,
             clip.score,
             clip.segment_source,
             json.dumps(clip.game_signals),
@@ -207,9 +208,9 @@ def _insert_clip(cur: sqlite3.Cursor, extract_id: int, clip: Clip) -> None:
     audio_cues = " ".join(clip.audio.cues or [])
     tags = _build_tags(clip)
     cur.execute(
-        "INSERT INTO clips_fts(rowid, description, audio_cues, tags) "
-        "VALUES (?, ?, ?, ?)",
-        (rowid, clip.description, audio_cues, tags),
+        "INSERT INTO clips_fts(rowid, description, dialogue, audio_cues, tags) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (rowid, clip.description, clip.dialogue, audio_cues, tags),
     )
 
 

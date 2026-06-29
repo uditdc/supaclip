@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class SourceInfo(BaseModel):
@@ -42,6 +42,7 @@ class Clip(BaseModel):
     resolution: str
     fps: float
     description: str
+    dialogue: str = ""
     categories: list[str] = Field(default_factory=list)
     score: int
     game_signals: dict[str, Any] = Field(default_factory=dict)

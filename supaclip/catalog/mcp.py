@@ -63,6 +63,9 @@ def _build_server():
         `categories` filters by category (OR by default; AND if all_categories).
         `signals` is a list of "key=value" or "key~=value" filters over each
         clip's game_signals JSON.
+        `order_by` is one of "score" (default), "duration", "created_at", or
+        "timeline" (chronological by source_in) — use "timeline" with a `source`
+        filter to walk a film's scenes in story order.
         Returns a list of clip dicts including absolute file/keyframe paths.
         """
         from .search import parse_signal_filter
@@ -119,9 +122,9 @@ def _build_server():
         """Compact preview of a clip for EDL composition.
 
         Returns the fields Claude needs to decide whether a clip fits a b-roll
-        cue: description, categories, duration, score, keyframe_paths, source
-        file, and source_in/source_out (so that EDLVideoCue.source_in can be
-        set correctly).
+        cue: description, dialogue (spoken lines in the scene, if subtitles were
+        ingested), categories, duration, score, keyframe_paths, source file, and
+        source_in/source_out (so that EDLVideoCue.source_in can be set correctly).
         """
         with _conn() as conn:
             row = get_clip(conn, clip_id)
@@ -131,6 +134,7 @@ def _build_server():
                 "clip_id": row.clip_id,
                 "clip_local_id": row.clip_local_id,
                 "description": row.description,
+                "dialogue": row.dialogue,
                 "categories": row.categories,
                 "duration": row.duration,
                 "score": row.score,
