@@ -185,6 +185,22 @@ def chunk_alignment(
     return _attach_words(cleaned, _extract_words(alignment))
 
 
+def chunks_from_cues(cues) -> list[CaptionChunk]:
+    """Build caption chunks from pre-timed cues (e.g. source subtitles).
+
+    One chunk per cue, using the cue's own timing. No per-word timing is
+    available, so these render as whole-phrase captions (karaoke fill, which
+    needs word times, degrades to whole-phrase automatically).
+    """
+    out: list[CaptionChunk] = []
+    for c in cues:
+        text = " ".join(str(c.text).split())
+        if text and c.end > c.start:
+            out.append(CaptionChunk(text=text, start=float(c.start), end=float(c.end)))
+    out.sort(key=lambda c: c.start)
+    return out
+
+
 def _extract_words(alignment: Alignment) -> list[CaptionWord]:
     """Split the character-level alignment into whitespace-delimited words,
     each timed from its first character's start to its last character's end."""

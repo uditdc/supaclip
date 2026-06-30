@@ -6,12 +6,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ..core.ffmpeg import measure_peak_db, segment_decodes_clean
+from ..extract.subtitles import cues_for_range, load_for_video
 from .db import connect
 from .paths import resolve_catalog_path
 from .search import (
     ClipRow,
     get_clip,
     get_source,
+    get_source_summary,
     list_sources,
     search,
     stats,
@@ -63,6 +66,9 @@ def _build_server():
         `categories` filters by category (OR by default; AND if all_categories).
         `signals` is a list of "key=value" or "key~=value" filters over each
         clip's game_signals JSON.
+        `order_by` is one of "score" (default), "duration", "created_at", or
+        "timeline" (chronological by source_in) — use "timeline" with a `source`
+        filter to walk a film's scenes in story order.
         Returns a list of clip dicts including absolute file/keyframe paths.
         """
         from .search import parse_signal_filter
@@ -107,6 +113,18 @@ def _build_server():
             return list_sources(conn)
 
     @server.tool()
+    def catalog_get_summary(source_id: int) -> dict[str, Any] | None:
+        """Whole-film story spine for a source, if one was generated at extract.
+
+        Returns {synopsis, themes, tone, characters:[{name, role}],
+        beats:[{title, start, end, summary}], generated_by} — use this to anchor
+        a full-arc recap (chapter on the beats, name characters consistently).
+        Returns None when the source has no stored summary.
+        """
+        with _conn() as conn:
+            return get_source_summary(conn, source_id)
+
+    @server.tool()
     def catalog_stats() -> dict[str, Any]:
         """Row counts and DB size."""
         with _conn() as conn:
@@ -115,13 +133,59 @@ def _build_server():
         return {"catalog": str(catalog_path), "size_bytes": size, **s}
 
     @server.tool()
+    def probe_clip(clip_id: int, max_seconds: float = 60.0) -> dict[str, Any] | None:
+        """Pre-flight a clip's media before using it in an EDL.
+
+        Real-world movie rips have corrupt H.264/AAC regions that decode
+        tolerantly but abort a render. Returns `decodes_clean` (skip the clip
+        if false — pick another in the same beat) and `peak_db` (to set a
+        constant audio gain, e.g. level_db = target_peak - peak_db). Probes the
+        first `max_seconds` of the clip.
+        """
+        with _conn() as conn:
+            row = get_clip(conn, clip_id)
+            if row is None:
+                return None
+            probe_dur = min(float(row.duration), float(max_seconds))
+            return {
+                "clip_id": row.clip_id,
+                "source_in": row.source_in,
+                "duration": row.duration,
+                "probe_seconds": round(probe_dur, 3),
+                "decodes_clean": segment_decodes_clean(row.file, row.source_in, probe_dur),
+                "peak_db": measure_peak_db(row.file, row.source_in, probe_dur),
+            }
+
+    @server.tool()
+    def get_clip_subtitles(clip_id: int, max_seconds: float = 60.0) -> dict[str, Any] | None:
+        """The source film's own subtitle lines within a clip's window, re-timed
+        to clip-local coordinates (start 0).
+
+        Feed these into `EDLCaptions.cues` to burn the film's real dialogue,
+        synced, in our caption style (movie-clips). Empty `cues` if the source
+        has no subtitles.
+        """
+        with _conn() as conn:
+            row = get_clip(conn, clip_id)
+            if row is None:
+                return None
+            cues, source = load_for_video(row.file)
+            window = min(float(row.duration), float(max_seconds))
+            scoped = cues_for_range(cues, row.source_in, row.source_in + window)
+            return {
+                "clip_id": row.clip_id,
+                "source": source,
+                "cues": [{"start": c.start, "end": c.end, "text": c.text} for c in scoped],
+            }
+
+    @server.tool()
     def get_clip_preview(clip_id: int) -> dict[str, Any] | None:
         """Compact preview of a clip for EDL composition.
 
         Returns the fields Claude needs to decide whether a clip fits a b-roll
-        cue: description, categories, duration, score, keyframe_paths, source
-        file, and source_in/source_out (so that EDLVideoCue.source_in can be
-        set correctly).
+        cue: description, dialogue (spoken lines in the scene, if subtitles were
+        ingested), categories, duration, score, keyframe_paths, source file, and
+        source_in/source_out (so that EDLVideoCue.source_in can be set correctly).
         """
         with _conn() as conn:
             row = get_clip(conn, clip_id)
@@ -131,6 +195,7 @@ def _build_server():
                 "clip_id": row.clip_id,
                 "clip_local_id": row.clip_local_id,
                 "description": row.description,
+                "dialogue": row.dialogue,
                 "categories": row.categories,
                 "duration": row.duration,
                 "score": row.score,
@@ -236,7 +301,18 @@ def _build_server():
     return server
 
 
+def _load_dotenv_if_present() -> None:
+    try:
+        from dotenv import find_dotenv, load_dotenv
+    except ImportError:
+        return
+    path = find_dotenv(usecwd=True)
+    if path:
+        load_dotenv(path, override=False)
+
+
 def main(argv: list[str] | None = None) -> int:
+    _load_dotenv_if_present()
     try:
         server = _build_server()
     except SystemExit as e:

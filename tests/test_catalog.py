@@ -14,6 +14,7 @@ from supaclip.catalog.schema import SCHEMA_VERSION, migrate
 from supaclip.catalog.search import (
     get_clip,
     get_source,
+    get_source_summary,
     list_sources,
     parse_signal_filter,
     search,
@@ -21,10 +22,14 @@ from supaclip.catalog.search import (
 )
 from supaclip.core.manifest import (
     AudioInfo,
+    CharacterRole,
     Clip,
     ExtractInfo,
     Manifest,
     SourceInfo,
+    SourceSummary,
+    StoryBeat,
+    load_manifest,
     now_iso,
     save_manifest,
 )
@@ -116,6 +121,63 @@ def test_migrate_fresh_and_idempotent(tmp_path: Path):
         "SELECT value FROM meta WHERE key='schema_version'"
     ).fetchone()
     assert int(row[0]) == SCHEMA_VERSION
+    conn.close()
+
+
+_V1_SCHEMA = """
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE sources (
+    id INTEGER PRIMARY KEY, file_path TEXT, fingerprint TEXT UNIQUE,
+    duration REAL, resolution TEXT, fps REAL, has_audio INTEGER DEFAULT 1);
+CREATE TABLE extracts (
+    id INTEGER PRIMARY KEY, source_id INTEGER, segmenter TEXT, analyzer TEXT,
+    game_profile TEXT, taxonomy_json TEXT, created_at TEXT, manifest_path TEXT);
+CREATE TABLE clips (
+    id INTEGER PRIMARY KEY, extract_id INTEGER, clip_local_id TEXT, file TEXT,
+    source_in REAL, source_out REAL, duration REAL, resolution TEXT, fps REAL,
+    description TEXT, score INTEGER, segment_source TEXT,
+    game_signals_json TEXT DEFAULT '{}', audio_json TEXT DEFAULT '{}',
+    keyframes_json TEXT DEFAULT '[]');
+CREATE TABLE clip_categories (clip_id INTEGER, category TEXT, PRIMARY KEY (clip_id, category));
+CREATE VIRTUAL TABLE clips_fts USING fts5(description, audio_cues, tags, tokenize='porter unicode61');
+"""
+
+
+def test_migrate_v1_to_v2_adds_dialogue_and_rebuilds_fts(tmp_path: Path):
+    import sqlite3
+
+    from supaclip.catalog.schema import migrate
+
+    db = tmp_path / "v1.db"
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(_V1_SCHEMA)
+    conn.execute("INSERT INTO meta(key, value) VALUES('schema_version', '1')")
+    conn.execute(
+        "INSERT INTO clips(id, extract_id, clip_local_id, file, source_in, source_out, "
+        "duration, resolution, fps, description, score, segment_source) "
+        "VALUES (1, 1, 'clip_01', 'a.mp4', 0, 10, 10, '1x1', 30, "
+        "'a quiet sunset over the bay', 50, 'scene')",
+    )
+    conn.execute("INSERT INTO clip_categories(clip_id, category) VALUES (1, 'romance')")
+    conn.execute(
+        "INSERT INTO clips_fts(rowid, description, audio_cues, tags) VALUES (1, ?, ?, ?)",
+        ("a quiet sunset over the bay", "", "romance"),
+    )
+    conn.commit()
+
+    migrate(conn)
+
+    assert int(conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0]) == SCHEMA_VERSION
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(clips)")}
+    assert "dialogue" in cols
+    fts_cols = {r[1] for r in conn.execute("PRAGMA table_info(clips_fts)")}
+    assert "dialogue" in fts_cols
+    # rebuilt FTS preserved description and tags
+    hits = conn.execute("SELECT rowid FROM clips_fts WHERE clips_fts MATCH 'sunset'").fetchall()
+    assert [h[0] for h in hits] == [1]
+    tag_hits = conn.execute("SELECT rowid FROM clips_fts WHERE clips_fts MATCH 'romance'").fetchall()
+    assert [h[0] for h in tag_hits] == [1]
     conn.close()
 
 
@@ -283,12 +345,86 @@ def test_search_ordering(populated):
     assert res[0].score >= res[1].score
     res = search(conn, order_by="duration")
     assert res[0].duration >= res[1].duration
+    res = search(conn, order_by="timeline")
+    assert res[0].source_in <= res[1].source_in
 
 
 def test_search_limit(populated):
     conn, _ = populated
     res = search(conn, limit=1)
     assert len(res) == 1
+
+
+def test_dialogue_stored_and_searchable(tmp_path: Path):
+    source = tmp_path / "film.mp4"
+    source.write_bytes(b"FAKE")
+    clip = Clip(
+        id="clip_01", file="clip_01.mp4", source_in=0.0, source_out=12.0,
+        duration=12.0, resolution="1920x1080", fps=24.0,
+        description="Two figures talk in a dim room.",
+        dialogue="The serum is the only antidote left.",
+        categories=["dialogue"], score=60,
+        audio=AudioInfo(peak_loudness_db=-20.0, cues=[]),
+        keyframes=[], segment_source="scene",
+    )
+    manifest = Manifest(
+        source=SourceInfo(file=str(source), duration=120.0, resolution="1920x1080", fps=24.0),
+        extract=ExtractInfo(segmenter="scene", analyzer="frames", game_profile="movie",
+                            created_at=now_iso()),
+        taxonomy=["dialogue"], clips=[clip],
+    )
+    mpath = tmp_path / "manifest.json"
+    save_manifest(manifest, mpath)
+
+    conn = connect(tmp_path / "c.db")
+    add_manifest(conn, mpath)
+
+    # dialogue is round-tripped onto the clip row
+    assert search(conn)[0].dialogue == "The serum is the only antidote left."
+    # and indexed: a word only present in the dialogue is findable by FTS
+    hits = search(conn, query="antidote")
+    assert len(hits) == 1 and hits[0].clip_local_id == "clip_01"
+    conn.close()
+
+
+def test_source_summary_round_trip(tmp_path: Path):
+    source = tmp_path / "film.mp4"
+    source.write_bytes(b"FAKE")
+    summary = SourceSummary(
+        synopsis="A chemist races to cure a plague.",
+        themes=["sacrifice"],
+        tone="tense thriller",
+        characters=[CharacterRole(name="Dr. Vance", role="protagonist")],
+        beats=[StoryBeat(title="Outbreak", start=0.0, end=60.0, summary="The plague spreads.")],
+        generated_by="test-model",
+    )
+    clip = Clip(
+        id="clip_01", file="clip_01.mp4", source_in=0.0, source_out=12.0, duration=12.0,
+        resolution="1920x1080", fps=24.0, description="A lab at night.",
+        categories=["establishing"], score=50,
+        audio=AudioInfo(), keyframes=[], segment_source="scene",
+    )
+    manifest = Manifest(
+        source=SourceInfo(file=str(source), duration=120.0, resolution="1920x1080", fps=24.0),
+        extract=ExtractInfo(segmenter="scene", analyzer="frames", game_profile="movie",
+                            created_at=now_iso()),
+        taxonomy=["establishing"], clips=[clip], summary=summary,
+    )
+    mpath = tmp_path / "manifest.json"
+    save_manifest(manifest, mpath)
+    # summary survives a manifest save/load cycle
+    assert load_manifest(mpath).summary.synopsis == summary.synopsis
+
+    conn = connect(tmp_path / "c.db")
+    add_manifest(conn, mpath)
+    src_id = list_sources(conn)[0]["id"]
+    got = get_source_summary(conn, src_id)
+    assert got["synopsis"] == "A chemist races to cure a plague."
+    assert got["themes"] == ["sacrifice"]
+    assert got["characters"] == [{"name": "Dr. Vance", "role": "protagonist"}]
+    assert got["beats"][0]["title"] == "Outbreak"
+    assert get_source_summary(conn, 999) is None
+    conn.close()
 
 
 def test_search_resolves_paths(populated, tmp_path):

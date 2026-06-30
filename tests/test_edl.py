@@ -9,6 +9,8 @@ from supaclip.core.edl import (
     EDL_SCHEMA_VERSION,
     EDLAnnotation,
     EDLAudioCue,
+    EDLCaptionCue,
+    EDLCaptions,
     EDLMusic,
     EDLOSTCue,
     EDLOutput,
@@ -78,6 +80,45 @@ def test_validate_detects_short_track():
     edl.video.pop()
     issues = validate_edl(edl)
     assert any("ends at" in i.message for i in issues if i.severity == "error")
+
+
+def test_validate_source_captions_without_voiceover_ok():
+    # movie-clips: clip audio + pre-timed source-subtitle captions, no voiceover
+    edl = EDL(
+        title="clip",
+        output=EDLOutput(duration=10.0),
+        video=[EDLVideoCue(start=0.0, end=10.0, clip_id=1)],
+        audio=[EDLAudioCue(start=0.0, end=10.0, kind="clip_audio")],
+        captions=EDLCaptions(style="clean_white", cues=[
+            EDLCaptionCue(start=1.0, end=4.0, text="The serum is our only hope."),
+        ]),
+    )
+    errs = [i for i in validate_edl(edl) if i.severity == "error"]
+    assert errs == []
+
+
+def test_validate_captions_without_voiceover_or_cues_errors():
+    edl = EDL(
+        title="x",
+        output=EDLOutput(duration=10.0),
+        video=[EDLVideoCue(start=0.0, end=10.0, clip_id=1)],
+        audio=[EDLAudioCue(start=0.0, end=10.0, kind="clip_audio")],
+        captions=EDLCaptions(style="clean_white"),
+    )
+    errs = [i for i in validate_edl(edl) if i.severity == "error"]
+    assert any("captions require" in e.message for e in errs)
+
+
+def test_validate_caption_cue_out_of_range_errors():
+    edl = EDL(
+        title="x",
+        output=EDLOutput(duration=10.0),
+        video=[EDLVideoCue(start=0.0, end=10.0, clip_id=1)],
+        audio=[EDLAudioCue(start=0.0, end=10.0, kind="clip_audio")],
+        captions=EDLCaptions(cues=[EDLCaptionCue(start=8.0, end=14.0, text="late")]),
+    )
+    errs = [i for i in validate_edl(edl) if i.severity == "error"]
+    assert any("captions.cues[0]" in e.path for e in errs)
 
 
 def test_validate_voiceover_referenced_but_missing():

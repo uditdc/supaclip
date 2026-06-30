@@ -11,7 +11,7 @@ from supaclip.core.ffmpeg import ensure_ffmpeg, probe
 from supaclip.core.log import Logger
 from supaclip.stitch.annotation import render_annotation_pngs
 from supaclip.stitch.assembly import CueInput, RenderInputs, build_command
-from supaclip.stitch.captions import chunk_alignment, render_caption_pngs
+from supaclip.stitch.captions import chunk_alignment, chunks_from_cues, render_caption_pngs
 from supaclip.stitch.encode import resolution_scale_factor, scale_edl, select_encoder
 from supaclip.stitch.music import build_music_plan, resolve_music_file
 from supaclip.stitch.overlay import render_ost_pngs, render_watermark_png
@@ -162,16 +162,21 @@ def render(
         log.info(f"rendered {len(annotation_renders)} circle png(s) -> {ann_cache}")
 
     caption_renders = []
-    if edl.captions is not None and alignment is not None:
-        log.stage("render speech captions")
-        voiceover_cues = [c for c in edl.audio if c.kind == "voiceover"]
-        voiceover_offset = voiceover_cues[0].start if voiceover_cues else 0.0
-        chunks = chunk_alignment(
-            alignment,
-            max_words=edl.captions.max_words,
-            max_chars=edl.captions.max_chars,
-            min_chunk_duration=edl.captions.min_chunk_duration,
-        )
+    if edl.captions is not None and (alignment is not None or edl.captions.cues):
+        voiceover_offset = 0.0
+        if edl.captions.cues:
+            log.stage("render source captions")
+            chunks = chunks_from_cues(edl.captions.cues)
+        else:
+            log.stage("render speech captions")
+            voiceover_cues = [c for c in edl.audio if c.kind == "voiceover"]
+            voiceover_offset = voiceover_cues[0].start if voiceover_cues else 0.0
+            chunks = chunk_alignment(
+                alignment,
+                max_words=edl.captions.max_words,
+                max_chars=edl.captions.max_chars,
+                min_chunk_duration=edl.captions.min_chunk_duration,
+            )
         caption_cache = Path(config.cache_dir).expanduser() / "captions"
         caption_renders = render_caption_pngs(
             chunks=chunks,

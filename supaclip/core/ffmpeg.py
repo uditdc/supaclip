@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -163,6 +164,65 @@ def extract_keyframes(
         _run(cmd)
         paths.append(out_path)
     return paths
+
+
+def segment_decodes_clean(video_path: str | Path, start: float, duration: float) -> bool:
+    """True if [start, start+duration) decodes with no errors in any stream.
+
+    Real-world rips carry corrupt H.264 regions and unsupported/variable AAC
+    that a plain decode tolerates but a complex filtergraph render aborts on.
+    A clean segment logs nothing at error level — the reliable pre-flight signal.
+    """
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "-ss", f"{start:.3f}", "-t", f"{duration:.3f}",
+        "-i", str(video_path), "-f", "null", "-",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError as e:
+        raise FFmpegError(str(e)) from e
+    return not [
+        ln for ln in (proc.stderr or "").splitlines()
+        if ln.strip() and "QT chapter" not in ln
+    ]
+
+
+def measure_peak_db(video_path: str | Path, start: float, duration: float) -> float | None:
+    """Peak (max) volume in dB of the segment's audio, via the volumedetect
+    filter. Returns None if there's no audio or detection fails."""
+    cmd = [
+        "ffmpeg", "-hide_banner", "-nostats",
+        "-ss", f"{start:.3f}", "-t", f"{duration:.3f}",
+        "-i", str(video_path), "-map", "0:a:0",
+        "-af", "volumedetect", "-f", "null", "-",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError as e:
+        raise FFmpegError(str(e)) from e
+    m = re.search(r"max_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", proc.stderr or "")
+    return float(m.group(1)) if m else None
+
+
+def extract_subtitle_text(video_path: str | Path, stream_index: int = 0) -> str | None:
+    """Extract an embedded subtitle stream as WebVTT text.
+
+    Returns the cue text for `0:s:<stream_index>`, or None if the stream is
+    absent or not a text subtitle (image subtitles like PGS can't be converted).
+    """
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "-i", str(video_path), "-map", f"0:s:{stream_index}",
+        "-f", "webvtt", "-",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError as e:
+        raise FFmpegError(str(e)) from e
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        return None
+    return proc.stdout
 
 
 def list_encoders() -> set[str]:

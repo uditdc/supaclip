@@ -50,7 +50,7 @@ supaclip/
 ├── __init__.py                version
 ├── cli.py                     umbrella dispatcher
 ├── core/                      shared, pipeline-agnostic primitives
-│   ├── ffmpeg.py              probe / loudness / keyframes / run_ffmpeg / cut
+│   ├── ffmpeg.py              probe / loudness / keyframes / subtitle extract / decode-clean + peak probe / cut
 │   ├── manifest.py            Pydantic models: Manifest, Clip, SourceInfo
 │   ├── edl.py                 Pydantic models + validate_edl()
 │   ├── cache.py               file-fingerprint keyed JSON cache
@@ -61,10 +61,13 @@ supaclip/
 │   ├── pipeline.py            orchestrates probe → segment → analyse → aggregate → write manifest
 │   ├── profiles.py            GameProfile + taxonomy/signals (e.g. gta6)
 │   ├── segment.py             manual / interval / scene / auto / file segmenters
+│   ├── subtitles.py           SRT/VTT parse + sidecar/embedded load + per-range dialogue
 │   ├── chunking.py            audio-trough chunking within a segment
 │   ├── audio.py               loudness peaks + per-range audio factor
 │   ├── analyze.py             SegmentEvent / SegmentAnalysis types + backend factory
+│   ├── llm.py                 shared text-LLM transport (LLMConfig + call_json)
 │   ├── aggregate.py           final dedup/merge pass over events (LLM call)
+│   ├── summarize.py           whole-source rollup: synopsis/theme/characters/beats (LLM call)
 │   ├── dedupe.py              IoU-based temporal merge of candidate ranges
 │   ├── backends/
 │   │   ├── _shared.py         JSON parsing + event coercion helpers
@@ -117,14 +120,26 @@ Per video, `_run_one()` walks these stages:
 |---------------|---------------------------------|-------------------------------------------|
 | Probe         | `core/ffmpeg.py: probe()`       | no (ffprobe is cheap)                     |
 | Audio energy  | `core/ffmpeg.py: extract_loudness_curve` + `extract/audio.py` | yes (`audio`/fingerprint)   |
+| Subtitles     | `extract/subtitles.py`          | no (sidecar/embedded parse is cheap)      |
 | Segmenter     | `extract/segment.py`            | yes (`segments`/fingerprint+params+`v2-trough`) |
 | Dedup         | `extract/dedupe.py`             | n/a (deterministic)                       |
 | Analyse       | `extract/analyze.py` + backends | yes per-chunk (`analysis`/fingerprint+chunk+prompt_version) |
 | Aggregate     | `extract/aggregate.py`          | yes (`aggregate`/fingerprint+event-signature) |
+| Summarize     | `extract/summarize.py`          | yes (`summary`/fingerprint+clip-signature) |
 | Write manifest| `core/manifest.py: save_manifest` | n/a                                     |
 
 Everything cacheable goes through `core.cache.Cache`, keyed by a file
 fingerprint (`fingerprint_file()`) so editing the source invalidates results.
+
+The **Subtitles** stage (`extract/subtitles.py`) resolves a film's dialogue in
+cost order — explicit `--subtitles` path → sidecar `<stem>.srt/.vtt` →
+embedded text stream (`core/ffmpeg.py: extract_subtitle_text`, WebVTT via
+`-map 0:s:0`) — and parses it into time-ordered `SubtitleCue`s. There is no
+speech-to-text; with no subtitles the stage no-ops and descriptions stay
+vision-only (`--no-subtitles` forces this). At manifest time each clip's
+`dialogue` is the concatenation of cues overlapping its `[source_in,
+source_out)` window (`dialogue_for_range`), so the catalog can be searched by
+what is *said*, not only by what the vision model *saw*.
 
 ### 3.2 Segmenters
 
@@ -187,6 +202,33 @@ failure the input event list is returned unchanged so the pipeline always
 produces output. Finally `_enforce_min_duration()` extends or drops events
 shorter than `MIN_CLIP_SECONDS` (10s).
 
+Both the aggregate and summarize passes send a text prompt to whichever
+provider the analyzer uses and expect JSON back; that transport lives in
+`extract/llm.py` (`LLMConfig` + `call_json`, OpenAI-compat or Google AI Studio).
+`call_json` and the `frames` vision call both go through `llm.retry_call`
+(exponential backoff), so a transient 429/5xx on a rate-limited endpoint backs
+off instead of aborting. If a per-chunk analysis still fails after retries, the
+pipeline logs it, treats the chunk as zero events, leaves it **uncached**, and
+continues — a re-run retries only the failed chunks.
+
+### 3.5.1 Summarize (whole-source rollup)
+
+After clips are built, `extract/summarize.py: summarize_source` runs one more
+text-only pass over the final scenes — in story order, **with each scene's
+dialogue** — and returns a `SourceSummary`: a 150–250 word synopsis, themes,
+tone, a principal-character list (`name`/`role`), and a contiguous `beats`
+list (act/location spans) covering the runtime. Short films are summarized in
+one call; films with more than `WINDOW_SCENES` (30) scenes are summarized
+**hierarchically** — scenes are split into windows, each window summarized, then
+a reduce pass writes the global synopsis from the window summaries — so a long
+film never overflows the model context. Any user-supplied
+`VideoContext` (an up-front synopsis + cast via `--video-intro`/`--context-file`)
+primes the prompt as authoritative; the model fills in and structures the rest.
+The result is the "story spine" the movie-recap skill chapters on. Best-effort:
+any failure yields `None` and the manifest simply has no summary. Cached in the
+`summary` bucket (fingerprint + analyzer + model + profile + prompt version +
+context fingerprint + clip signature); skip with `--no-summary`.
+
 ### 3.6 Manifest
 
 For each surviving event, `_run_one` extracts `--keyframes N` JPEGs at evenly
@@ -200,11 +242,18 @@ extract { segmenter, analyzer, game_profile, created_at }
 taxonomy [...]
 clips [
   { id, file, source_in, source_out, duration, resolution, fps,
-    description, categories, score, game_signals,
+    description, dialogue, categories, score, game_signals,
     audio { peak_loudness_db, cues },
     keyframes [...], segment_source }
 ]
+summary? { synopsis, themes[], tone, characters[{name, role}],
+           beats[{title, start, end, summary}], generated_by }
 ```
+
+`Clip.dialogue` (manifest `SCHEMA_VERSION = 2`) holds the spoken lines for the
+clip's time window, or `""` when no subtitles were ingested. The optional
+top-level `summary` block (`SCHEMA_VERSION = 3`) is the whole-source rollup from
+§3.5.1, or absent when `--no-summary` was set or the pass yielded nothing.
 
 `Clip.file` is stored relative to the manifest dir when the source lives
 under it, otherwise absolute. The manifest is the deliverable of Phase 1 —
@@ -219,24 +268,35 @@ A single SQLite DB at `~/.local/share/supaclip/catalog.db` (overridable via
 
 - `sources` (one row per unique fingerprint),
 - `extracts` (one row per ingested manifest; FK → sources),
-- `clips` (clip rows; FK → extracts; stores game_signals/audio/keyframes as JSON),
+- `clips` (clip rows; FK → extracts; stores `dialogue` plus
+  game_signals/audio/keyframes as JSON),
 - `clip_categories` (M:N category index),
-- `clips_fts` (FTS5 virtual table over `description`, `audio_cues`, `tags`).
+- `source_summaries` (one row per source: synopsis/themes/tone/characters/beats
+  as columns + JSON; upserted from a manifest's `summary`),
+- `clips_fts` (FTS5 virtual table over `description`, `dialogue`, `audio_cues`,
+  `tags`).
 
 `ingest.add_manifest()` ingests a manifest; `add_directory()` walks a tree
 looking for `manifest.json`. Both upsert by `(source_id, created_at,
 segmenter, analyzer, game_profile)` so re-ingesting is idempotent.
 
+The catalog DDL is versioned (`schema.py: SCHEMA_VERSION`, stored in `meta`).
+`migrate()` runs the current DDL (idempotent `IF NOT EXISTS`) on every connect
+and, for an older DB, applies upgrade steps — e.g. `_migrate_v1_to_v2` adds the
+`clips.dialogue` column and rebuilds `clips_fts` with its new `dialogue` column
+from the persisted rows (FTS5 can't add a column in place).
+
 ### 4.2 Search
 
 `catalog/search.py` supports:
 
-- FTS5 free-text `query` over description / audio cues / tags,
+- FTS5 free-text `query` over description / dialogue / audio cues / tags,
 - `categories` filter (OR by default, AND with `all_categories=True`),
 - score / duration ranges,
 - `segmenter`, `game_profile`, `source` filters,
 - signal expressions: `"key=value"` (exact) or `"key~=value"` (substring/in-list),
-- `order_by` and `limit`.
+- `order_by` (`score`, `duration`, `created_at`, or `timeline` —
+  chronological by `source_in`, for walking a film in story order) and `limit`.
 
 Returned `ClipRow` objects expose absolute `file` and `keyframes` paths so
 downstream tools (and Claude) don't need to know about the catalog DB
@@ -248,18 +308,35 @@ location.
 FastMCP. Tools:
 
 - `catalog_search`, `catalog_get_clip`, `catalog_get_source`,
-  `catalog_list_sources`, `catalog_stats` — wrappers around `search.py`.
+  `catalog_list_sources`, `catalog_stats`, `catalog_get_summary` — wrappers
+  around `search.py`. `catalog_get_summary(source_id)` returns the stored
+  story spine (synopsis/themes/tone/characters/beats) or null.
 - `get_clip_preview` — compact dict tailored for EDL composition (only the
   fields Claude needs to pick a clip and set `source_in`).
+- `probe_clip` — pre-flights a clip's media (`segment_decodes_clean` +
+  `measure_peak_db` from `core/ffmpeg.py`): returns `decodes_clean` (skip
+  corrupt real-world-rip regions before they abort a render) and `peak_db` (to
+  set a constant audio gain). Used by the movie-clips skill for selection.
+- `get_clip_subtitles` — the source film's own subtitle lines within a clip's
+  window, re-timed to clip-local coords (`subtitles.cues_for_range`), for
+  burning the film's dialogue as styled `EDLCaptions.cues`.
 - `validate_edl` — runs `core.edl.validate_edl` with a catalog-backed
   resolver. Returns `{ok, issues}`.
 - `render_edl` — invokes `stitch.render.render()`. Spends ElevenLabs credits
   on first call for a given `(text, voice, settings)` tuple; subsequent calls
   hit the TTS cache.
 
-The Claude Code skill at `.claude/skills/stitch-director.md` chains
-`catalog_search → get_clip_preview → validate_edl → render_edl` end-to-end
-without user confirmation between steps.
+Three Claude Code skills drive these tools end-to-end without user confirmation
+between steps. `.claude/skills/stitch-director/` composes a *single* short from
+a user-supplied script (`catalog_search → get_clip_preview → validate_edl →
+render_edl`). `.claude/skills/movie-recap/` turns a whole film into a *series*
+of chronological recap shorts: it pulls the film's scenes via
+`catalog_search(order_by="timeline")`, chapters them, generates the narration
+from each chapter's descriptions + dialogue, and renders one short per chapter.
+`.claude/skills/movie-clips/` produces standalone highlight clips — one 30-60s
+short per beat with the film's original audio and its own subtitles styled
+(via `probe_clip` for clean selection + audio gain and `get_clip_subtitles` for
+captions); an optional `--commentary` mode adds a TTS take over ducked audio.
 
 ## 5. Phase 2 / 2.5 — Stitch
 
@@ -279,6 +356,14 @@ ost[]          { start, end, text, style, position }
 annotations[]  { start, end, shape: "circle" | "box" | "arrow", x, y, …, color, stroke_width }
 music?         { file, level_db=-22, duck=true }
 ```
+
+Captions have two timing sources: speech-synced from the voiceover (default,
+via TTS character timestamps) or **pre-timed `captions.cues`** — explicit
+`{start,end,text}` lines (e.g. the source film's own subtitles, offset to
+clip-local time) styled and burned in with no voiceover required. The
+`movie-clips` mode uses this with `clip_audio` (one segment per beat, original
+audio lifted by a per-clip constant `level_db` gain that peak-normalizes the
+quiet film audio — no limiter, so no reactive pumping).
 
 `validate_edl()` enforces:
 
@@ -387,9 +472,13 @@ long renders can stream `pct / speed / fps` events.
 
 ### 6.4 Schema versions
 
-Two independent versioned formats:
+Three independent versioned formats:
 
-- `core/manifest.py: SCHEMA_VERSION = 1` — bumped when `Manifest` changes.
+- `core/manifest.py: SCHEMA_VERSION = 3` — bumped when `Manifest` changes
+  (v2 added `Clip.dialogue`; v3 added the top-level `summary` block).
+- `catalog/schema.py: SCHEMA_VERSION = 3` — the SQLite DDL; `migrate()` carries
+  forward older catalogs (v2 added `clips.dialogue` + an FTS column; v3 added
+  the `source_summaries` table).
 - `core/edl.py: EDL_SCHEMA_VERSION = 1` — bumped when EDL changes; the
   validator flags mismatched versions.
 
@@ -441,6 +530,10 @@ $ supaclip catalog add clips/session/manifest.json
   prompt scaffolding without touching backend code.
 - **New segmenter**: add a function to `extract/segment.py` and dispatch in
   `pipeline._segment`.
+- **New dialogue source**: `extract/subtitles.py: load_for_video` resolves
+  explicit → sidecar → embedded today. A speech-to-text source would slot in as
+  a further fallback there, returning `list[SubtitleCue]`; nothing downstream
+  changes. See `docs/decisions/0002-subtitle-dialogue-ingestion.md`.
 - **New EDL effect / transition / annotation shape**: extend the literal in
   `core/edl.py`, add a branch in `stitch/effects.py` (or `transitions.py` /
   `annotation.py`), extend `validate_edl` with the new invariants.

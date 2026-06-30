@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 
 class SourceInfo(BaseModel):
@@ -42,12 +42,38 @@ class Clip(BaseModel):
     resolution: str
     fps: float
     description: str
+    dialogue: str = ""
     categories: list[str] = Field(default_factory=list)
     score: int
     game_signals: dict[str, Any] = Field(default_factory=dict)
     audio: AudioInfo = Field(default_factory=AudioInfo)
     keyframes: list[str] = Field(default_factory=list)
     segment_source: str
+
+
+class CharacterRole(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    role: str = ""
+
+
+class StoryBeat(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str
+    start: float
+    end: float
+    summary: str = ""
+
+
+class SourceSummary(BaseModel):
+    """Whole-film rollup: the story spine a recap is built from."""
+    model_config = ConfigDict(extra="forbid")
+    synopsis: str = ""
+    themes: list[str] = Field(default_factory=list)
+    tone: str = ""
+    characters: list[CharacterRole] = Field(default_factory=list)
+    beats: list[StoryBeat] = Field(default_factory=list)
+    generated_by: str = ""
 
 
 class Manifest(BaseModel):
@@ -57,6 +83,7 @@ class Manifest(BaseModel):
     extract: ExtractInfo
     taxonomy: list[str] = Field(default_factory=list)
     clips: list[Clip] = Field(default_factory=list)
+    summary: SourceSummary | None = None
 
 
 def save_manifest(manifest: Manifest, path: str | Path) -> None:

@@ -113,6 +113,9 @@ def _ingest_one(
     for clip in manifest.clips:
         _insert_clip(cur, extract_id, clip)
 
+    if manifest.summary is not None:
+        _upsert_summary(cur, source_id, manifest.summary)
+
     conn.commit()
     return IngestResult(
         manifest_path=manifest_path,
@@ -165,6 +168,24 @@ def _upsert_source(conn: sqlite3.Connection, manifest: Manifest) -> int:
     return cur.lastrowid
 
 
+def _upsert_summary(cur: sqlite3.Cursor, source_id: int, summary) -> None:
+    cur.execute(
+        """INSERT OR REPLACE INTO source_summaries
+           (source_id, synopsis, themes_json, tone, characters_json,
+            beats_json, generated_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            source_id,
+            summary.synopsis,
+            json.dumps(summary.themes),
+            summary.tone,
+            json.dumps([c.model_dump() for c in summary.characters]),
+            json.dumps([b.model_dump() for b in summary.beats]),
+            summary.generated_by,
+        ),
+    )
+
+
 def _delete_clips_for_extract(cur: sqlite3.Cursor, extract_id: int) -> None:
     rows = cur.execute(
         "SELECT id FROM clips WHERE extract_id = ?", (extract_id,)
@@ -178,9 +199,9 @@ def _insert_clip(cur: sqlite3.Cursor, extract_id: int, clip: Clip) -> None:
     cur.execute(
         """INSERT INTO clips
            (extract_id, clip_local_id, file, source_in, source_out, duration,
-            resolution, fps, description, score, segment_source,
+            resolution, fps, description, dialogue, score, segment_source,
             game_signals_json, audio_json, keyframes_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             extract_id,
             clip.id,
@@ -191,6 +212,7 @@ def _insert_clip(cur: sqlite3.Cursor, extract_id: int, clip: Clip) -> None:
             clip.resolution,
             clip.fps,
             clip.description,
+            clip.dialogue,
             clip.score,
             clip.segment_source,
             json.dumps(clip.game_signals),
@@ -207,9 +229,9 @@ def _insert_clip(cur: sqlite3.Cursor, extract_id: int, clip: Clip) -> None:
     audio_cues = " ".join(clip.audio.cues or [])
     tags = _build_tags(clip)
     cur.execute(
-        "INSERT INTO clips_fts(rowid, description, audio_cues, tags) "
-        "VALUES (?, ?, ?, ?)",
-        (rowid, clip.description, audio_cues, tags),
+        "INSERT INTO clips_fts(rowid, description, dialogue, audio_cues, tags) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (rowid, clip.description, clip.dialogue, audio_cues, tags),
     )
 
 

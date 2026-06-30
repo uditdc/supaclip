@@ -59,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--signal", action="append", default=[],
                           help="game-signal filter; key=value (exact) or key~=value (substring)")
     p_search.add_argument("--order-by",
-                          choices=("score", "duration", "created_at"),
+                          choices=("score", "duration", "created_at", "timeline"),
                           default="score")
     p_search.add_argument("--limit", type=int, default=50)
     p_search.add_argument("--json", dest="emit_json", action="store_true")

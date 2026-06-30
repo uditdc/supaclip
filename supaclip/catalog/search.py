@@ -10,6 +10,7 @@ ORDER_FIELDS = {
     "score": "c.score DESC",
     "duration": "c.duration DESC",
     "created_at": "e.created_at DESC",
+    "timeline": "c.source_in ASC",
 }
 
 
@@ -18,6 +19,7 @@ class ClipRow:
     clip_id: int
     clip_local_id: str
     description: str
+    dialogue: str
     score: int
     duration: float
     source_in: float
@@ -145,7 +147,7 @@ def search(
             params.extend([path, f"%{value}%"])
 
     order_sql = ORDER_FIELDS.get(order_by, ORDER_FIELDS["score"])
-    if query:
+    if query and order_by != "timeline":
         order_sql = "ft.rank, " + order_sql
 
     sql = f"""
@@ -153,6 +155,7 @@ def search(
             c.id            AS clip_id,
             c.clip_local_id AS clip_local_id,
             c.description   AS description,
+            c.dialogue      AS dialogue,
             c.score         AS score,
             c.duration      AS duration,
             c.source_in     AS source_in,
@@ -195,6 +198,7 @@ def get_clip(conn: sqlite3.Connection, clip_id: int) -> ClipRow | None:
             c.id            AS clip_id,
             c.clip_local_id AS clip_local_id,
             c.description   AS description,
+            c.dialogue      AS dialogue,
             c.score         AS score,
             c.duration      AS duration,
             c.source_in     AS source_in,
@@ -257,6 +261,26 @@ def get_source(conn: sqlite3.Connection, source_id: int) -> dict[str, Any] | Non
     return dict(row)
 
 
+def get_source_summary(conn: sqlite3.Connection, source_id: int) -> dict[str, Any] | None:
+    """Return the stored whole-film summary (synopsis/themes/tone/characters/beats)."""
+    row = conn.execute(
+        """SELECT synopsis, themes_json, tone, characters_json, beats_json, generated_by
+           FROM source_summaries WHERE source_id = ?""",
+        (source_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "source_id": source_id,
+        "synopsis": row["synopsis"],
+        "themes": json.loads(row["themes_json"] or "[]"),
+        "tone": row["tone"],
+        "characters": json.loads(row["characters_json"] or "[]"),
+        "beats": json.loads(row["beats_json"] or "[]"),
+        "generated_by": row["generated_by"],
+    }
+
+
 def stats(conn: sqlite3.Connection) -> dict[str, int]:
     out = {}
     for table in ("sources", "extracts", "clips", "clip_categories"):
@@ -285,6 +309,7 @@ def _row_to_clip(conn: sqlite3.Connection, row: sqlite3.Row) -> ClipRow:
         clip_id=clip_id,
         clip_local_id=row["clip_local_id"],
         description=row["description"],
+        dialogue=row["dialogue"] if "dialogue" in row.keys() else "",
         score=row["score"],
         duration=row["duration"],
         source_in=row["source_in"],

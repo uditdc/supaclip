@@ -183,18 +183,34 @@ claude mcp add supaclip \
   -- "$(pwd)/.venv/bin/supaclip-mcp"
 ```
 
-Tools exposed: `catalog_search`, `catalog_get_clip`, `catalog_get_source`,
-`catalog_list_sources`, `catalog_stats`, `get_clip_preview`, `validate_edl`, and
-`render_edl`. `render_edl` may spend TTS credits, but outputs are cached by
-`(text + voice + settings)` so re-renders of the same script are free.
+The server loads a `.env` in the working directory on startup, so
+`SUPACLIP_CATALOG` and the LLM/TTS keys can live there instead of `--env`.
+
+Tools exposed: `catalog_search` (incl. `order_by="timeline"` for story order),
+`catalog_get_clip`, `catalog_get_source`, `catalog_list_sources`,
+`catalog_stats`, `catalog_get_summary` (synopsis/themes/characters/beats),
+`get_clip_preview`, `probe_clip` (decode-clean + peak, for clean-clip selection
+and audio gain), `get_clip_subtitles` (the film's own subtitles, clip-local),
+`validate_edl`, and `render_edl`. `render_edl` may spend TTS credits, but
+outputs are cached by `(text + voice + settings)` so re-renders are free.
+
+> Prefer registering with `claude mcp add` (above) over a committed
+> `.mcp.json` — the absolute venv path is more robust than a relative one, and
+> it keeps per-machine config out of the repo.
 
 ### Claude Code skill
 
-The persistent skill at
-[`.claude/skills/stitch-director/SKILL.md`](.claude/skills/stitch-director/SKILL.md)
-auto-loads whenever you mention "short", "stitch", "EDL", "b-roll", etc. — it
-drives the full `catalog_search → validate_edl → render_edl` flow without
-re-prompting. For a one-shot paste-in version, use
+Persistent skills auto-load by intent and drive the MCP tools end-to-end
+without re-prompting:
+
+- [`stitch-director`](.claude/skills/stitch-director/SKILL.md) — a single short
+  from a script you supply ("short", "stitch", "EDL", "b-roll").
+- [`movie-recap`](.claude/skills/movie-recap/SKILL.md) — a whole film → a
+  chronological series of narrated recap shorts.
+- [`movie-clips`](.claude/skills/movie-clips/SKILL.md) — standalone highlight
+  clips, one per beat, with the film's audio + subtitles (or `--commentary`).
+
+For a one-shot paste-in version of the stitch flow, use
 [`docs/claude-prompt.md`](docs/claude-prompt.md).
 
 ## Configuration
