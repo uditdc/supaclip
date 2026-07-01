@@ -22,6 +22,11 @@ from supaclip.stitch.tts.cache import TTSCache
 
 DEFAULT_CACHE_DIR = "~/.cache/supaclip"
 
+# Kinetic captions/OST fan out to many small PNG overlays (karaoke × pop × cues).
+# Well within ffmpeg's reach for a Short, but warn past this so a runaway EDL is
+# visible rather than silently slow.
+OVERLAY_INPUT_WARN_THRESHOLD = 300
+
 
 @dataclass
 class RenderConfig:
@@ -138,6 +143,7 @@ def render(
             out_h=edl.output.height,
             cache_dir=ost_cache,
             fontfile=config.fontfile,
+            fps=edl.output.fps,
         )
         log.info(f"rendered {len(ost_renders)} OST png(s) -> {ost_cache}")
 
@@ -186,10 +192,22 @@ def render(
             cache_dir=caption_cache,
             voiceover_offset=voiceover_offset,
             fontfile=config.fontfile,
+            fps=edl.output.fps,
         )
         log.info(
             f"rendered {len(caption_renders)} caption png(s) "
             f"from {len(chunks)} phrase(s) -> {caption_cache}"
+        )
+
+    overlay_inputs = (
+        len(ost_renders) + len(caption_renders) + len(annotation_renders)
+        + (1 if watermark_render is not None else 0)
+    )
+    if overlay_inputs > OVERLAY_INPUT_WARN_THRESHOLD:
+        log.warn(
+            f"{overlay_inputs} overlay PNG inputs (captions/OST/annotations); "
+            f"animation multiplies inputs — keep the PNG cache warm and watch "
+            f"ffmpeg's open-file limit"
         )
 
     log.stage("render")

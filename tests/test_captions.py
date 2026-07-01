@@ -239,6 +239,207 @@ def test_all_styles_and_positions_have_presets():
         assert p in CAPTION_POSITION_FRACTION
 
 
+def test_default_render_is_byte_stable_across_runs(tmp_path: Path):
+    # "defaults unchanged" within the new baseline: shadow-off / animation-off
+    # output is deterministic run-to-run (pinned bundled font, no randomness).
+    chunks = chunk_alignment(_alignment_from_text("Stable baseline."),
+                             min_chunk_duration=0.0)
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    [ra] = render_caption_pngs(chunks=chunks, config=EDLCaptions(), out_w=1080,
+                               out_h=1920, cache_dir=a)
+    [rb] = render_caption_pngs(chunks=chunks, config=EDLCaptions(), out_w=1080,
+                               out_h=1920, cache_dir=b)
+    assert ra.png_path.name == rb.png_path.name
+    assert ra.png_path.read_bytes() == rb.png_path.read_bytes()
+
+
+def test_defaults_emit_one_render_per_chunk(tmp_path: Path):
+    align = _alignment_from_text("one two three four. five six seven eight.")
+    chunks = chunk_alignment(align, min_chunk_duration=0.0)
+    renders = render_caption_pngs(chunks=chunks, config=EDLCaptions(),
+                                  out_w=1080, out_h=1920, cache_dir=tmp_path)
+    assert len(renders) == len(chunks)
+
+
+def test_resolution_aware_caption_sizing(tmp_path: Path):
+    chunks = chunk_alignment(_alignment_from_text("Size."), min_chunk_duration=0.0)
+    from PIL import Image
+    [hd] = render_caption_pngs(chunks=chunks, config=EDLCaptions(style="clean_white"),
+                               out_w=1080, out_h=1920, cache_dir=tmp_path)
+    [uhd] = render_caption_pngs(chunks=chunks, config=EDLCaptions(style="clean_white"),
+                                out_w=2160, out_h=3840, cache_dir=tmp_path)
+    h1, h2 = Image.open(hd.png_path).height, Image.open(uhd.png_path).height
+    assert h2 / h1 == pytest.approx(2.0, abs=0.12)
+
+
+def test_karaoke_pop_adds_overlays_per_word(tmp_path: Path):
+    align = _alignment_from_text("one two three", char_dur=0.15)
+    chunks = chunk_alignment(align, max_words=10, max_chars=100, min_chunk_duration=0.0)
+    plain = render_caption_pngs(
+        chunks=chunks, config=EDLCaptions(highlight="karaoke_fill"),
+        out_w=1080, out_h=1920, cache_dir=tmp_path)
+    popped = render_caption_pngs(
+        chunks=chunks,
+        config=EDLCaptions(highlight="karaoke_fill", animate="pop",
+                           animate_duration=0.12, animate_overshoot=0.15),
+        out_w=1080, out_h=1920, cache_dir=tmp_path, fps=30)
+    assert len(popped) > len(plain)          # base words + pop overlays
+    assert len({r.x for r in popped}) == 1   # overlays share the phrase anchor
+    assert all(r.png_path.exists() for r in popped)
+
+
+def test_karaoke_pop_overlay_windows_are_within_word(tmp_path: Path):
+    align = _alignment_from_text("one two three", char_dur=0.3)
+    [chunk] = chunk_alignment(align, max_words=10, max_chars=100, min_chunk_duration=0.0)
+    cfg = EDLCaptions(highlight="karaoke_fill", animate="pop",
+                      animate_duration=0.15, animate_overshoot=0.2)
+    renders = render_caption_pngs(chunks=[chunk], config=cfg,
+                                  out_w=1080, out_h=1920, cache_dir=tmp_path, fps=30)
+    # every render stays inside the chunk window and starts are non-decreasing
+    for r in renders:
+        assert chunk.start - 1e-6 <= r.start <= chunk.end + 1e-6
+    starts = [r.start for r in renders]
+    assert starts == sorted(starts)
+
+
+def test_active_word_pill_changes_render(tmp_path: Path):
+    align = _alignment_from_text("one two three", char_dur=0.15)
+    chunks = chunk_alignment(align, max_words=10, max_chars=100, min_chunk_duration=0.0)
+    no_pill = render_caption_pngs(
+        chunks=chunks, config=EDLCaptions(highlight="karaoke_fill"),
+        out_w=1080, out_h=1920, cache_dir=tmp_path)
+    pill = render_caption_pngs(
+        chunks=chunks,
+        config=EDLCaptions(highlight="karaoke_fill", active_word_bg="#1E90FF",
+                           active_word_bg_radius=14),
+        out_w=1080, out_h=1920, cache_dir=tmp_path)
+    # a pill preset produces distinct PNGs from the no-pill baseline
+    assert {r.png_path.name for r in pill}.isdisjoint({r.png_path.name for r in no_pill})
+
+
+def test_default_word_spacing_widens_karaoke(tmp_path: Path, monkeypatch):
+    from PIL import Image
+
+    import supaclip.stitch.captions as cap
+    align = _alignment_from_text("one two three", char_dur=0.2)
+    [chunk] = chunk_alignment(align, max_words=10, max_chars=100, min_chunk_duration=0.0)
+    cfg = EDLCaptions(highlight="karaoke_fill")
+
+    monkeypatch.setattr(cap, "WORD_SPACING_FRAC", 0.0)
+    tight = render_caption_pngs(chunks=[chunk], config=cfg, out_w=1080, out_h=1920,
+                                cache_dir=tmp_path / "tight")
+    monkeypatch.setattr(cap, "WORD_SPACING_FRAC", 0.18)
+    spaced = render_caption_pngs(chunks=[chunk], config=cfg, out_w=1080, out_h=1920,
+                                 cache_dir=tmp_path / "spaced")
+    assert Image.open(spaced[0].png_path).width > Image.open(tight[0].png_path).width
+
+
+def test_active_word_highlight_zooms_current_word(tmp_path: Path):
+    align = _alignment_from_text("alpha bravo charlie", char_dur=0.2)
+    chunks = chunk_alignment(align, max_words=10, max_chars=100, min_chunk_duration=0.0)
+    fill = render_caption_pngs(
+        chunks=chunks, config=EDLCaptions(style="clean_white", highlight="karaoke_fill"),
+        out_w=1080, out_h=1920, cache_dir=tmp_path)
+    active = render_caption_pngs(
+        chunks=chunks,
+        config=EDLCaptions(style="clean_white", highlight="active_word",
+                           highlight_color="#39FF14"),
+        out_w=1080, out_h=1920, cache_dir=tmp_path, fps=30)
+    # active_word adds a persistent zoom overlay per word (default scale > 1)
+    assert len(active) == 2 * len(fill)
+    assert all(r.png_path.exists() for r in active)
+    assert len({r.x for r in active}) == 1
+    # its base renders differ from karaoke_fill (only the current word is lit)
+    assert {r.png_path.name for r in active}.isdisjoint({r.png_path.name for r in fill})
+
+
+def test_active_word_persistent_overlay_covers_word_window(tmp_path: Path):
+    align = _alignment_from_text("alpha bravo charlie", char_dur=0.3)
+    [chunk] = chunk_alignment(align, max_words=10, max_chars=100, min_chunk_duration=0.0)
+    renders = render_caption_pngs(
+        chunks=[chunk],
+        config=EDLCaptions(style="clean_white", highlight="active_word"),
+        out_w=1080, out_h=1920, cache_dir=tmp_path, fps=30)
+    # every render stays within the chunk; the zoom holds for the whole word
+    assert renders[0].start == pytest.approx(chunk.start)
+    assert renders[-1].end == pytest.approx(chunk.end)
+    for r in renders:
+        assert chunk.start - 1e-6 <= r.start < r.end <= chunk.end + 1e-6
+
+
+def test_active_word_scale_1_is_color_only(tmp_path: Path):
+    align = _alignment_from_text("alpha bravo charlie", char_dur=0.2)
+    chunks = chunk_alignment(align, max_words=10, max_chars=100, min_chunk_duration=0.0)
+    renders = render_caption_pngs(
+        chunks=chunks,
+        config=EDLCaptions(style="clean_white", highlight="active_word",
+                           active_word_scale=1.0),
+        out_w=1080, out_h=1920, cache_dir=tmp_path, fps=30)
+    # scale exactly 1.0 => recolor only, no zoom overlays (one render per word)
+    assert len(renders) == 3
+
+
+def test_karaoke_fill_zoom_is_opt_in(tmp_path: Path):
+    align = _alignment_from_text("alpha bravo charlie", char_dur=0.2)
+    chunks = chunk_alignment(align, max_words=10, max_chars=100, min_chunk_duration=0.0)
+    plain = render_caption_pngs(
+        chunks=chunks, config=EDLCaptions(highlight="karaoke_fill"),
+        out_w=1080, out_h=1920, cache_dir=tmp_path)
+    zoomed = render_caption_pngs(
+        chunks=chunks,
+        config=EDLCaptions(highlight="karaoke_fill", active_word_scale=1.18),
+        out_w=1080, out_h=1920, cache_dir=tmp_path, fps=30)
+    assert len(plain) == 3          # default fill: no zoom overlays
+    assert len(zoomed) == 6         # explicit scale zooms the active word too
+
+
+def test_plain_fade_splits_into_alpha_windows(tmp_path: Path):
+    chunks = chunk_alignment(_alignment_from_text("Fade me in and out."),
+                             min_chunk_duration=1.0)
+    plain = render_caption_pngs(chunks=chunks, config=EDLCaptions(),
+                                out_w=1080, out_h=1920, cache_dir=tmp_path)
+    faded = render_caption_pngs(chunks=chunks, config=EDLCaptions(fade_ms=120),
+                                out_w=1080, out_h=1920, cache_dir=tmp_path, fps=30)
+    assert len(faded) > len(plain)
+    # windows stay contiguous and cover the same span
+    assert faded[0].start == pytest.approx(plain[0].start)
+    assert faded[-1].end == pytest.approx(plain[-1].end)
+    for a, b in zip(faded, faded[1:]):
+        assert a.end == pytest.approx(b.start)
+
+
+def test_karaoke_pop_plus_fade_out_targets_chunk_end(tmp_path: Path):
+    # regression: with pop overlays present, the trailing fade must apply to the
+    # render that actually reaches chunk.end, not the last list entry (a pop
+    # overlay sitting near the last word's start).
+    align = _alignment_from_text("one two three", char_dur=0.4)
+    [chunk] = chunk_alignment(align, max_words=10, max_chars=100, min_chunk_duration=0.0)
+    cfg = EDLCaptions(highlight="karaoke_fill", animate="pop",
+                      animate_duration=0.12, fade_ms=150)
+    renders = render_caption_pngs(chunks=[chunk], config=cfg,
+                                  out_w=1080, out_h=1920, cache_dir=tmp_path, fps=30)
+    last_end = max(r.end for r in renders)
+    assert last_end == pytest.approx(chunk.end)
+    # the windows reaching the very end form a short alpha ramp (more than one)
+    tail = [r for r in renders if r.end > chunk.end - 0.15 + 1e-6]
+    assert len(tail) >= 2
+
+
+def test_plain_pop_scales_in(tmp_path: Path):
+    from PIL import Image
+    chunks = chunk_alignment(_alignment_from_text("Pop this in now."),
+                             min_chunk_duration=1.0)
+    renders = render_caption_pngs(
+        chunks=chunks,
+        config=EDLCaptions(style="boxed_dark", animate="pop", animate_duration=0.15),
+        out_w=1080, out_h=1920, cache_dir=tmp_path, fps=30)
+    assert len(renders) > 1
+    # the entrance frame is larger than the settled frame (grows from centre)
+    assert Image.open(renders[0].png_path).width >= Image.open(renders[-1].png_path).width
+    assert renders[-1].end == pytest.approx(chunks[0].end)
+
+
 def _make_edl(captions: EDLCaptions | None = None,
               voiceover: EDLVoiceover | None = None) -> EDL:
     return EDL(

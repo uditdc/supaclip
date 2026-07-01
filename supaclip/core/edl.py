@@ -12,12 +12,17 @@ EDL_SCHEMA_VERSION = 1
 
 ReframeMode = Literal["crop_center", "crop_left", "crop_right", "letterbox"]
 AudioKind = Literal["voiceover", "clip_audio", "silence"]
-OSTStyle = Literal["dark", "light", "yellow_punch", "red_alert", "pink_reveal"]
+OSTStyle = Literal[
+    "dark", "light", "yellow_punch", "red_alert", "pink_reveal",
+    "yellow_punch_shadow", "gradient_dark", "accent_bar",
+]
 OSTPosition = Literal["top", "middle", "bottom"]
 WatermarkPosition = Literal["top", "middle", "bottom"]
 CaptionStyleName = Literal["clean_white", "boxed_dark", "karaoke_yellow"]
 CaptionPosition = Literal["top", "middle", "bottom", "lower_third"]
-CaptionHighlight = Literal["none", "karaoke_fill"]
+CaptionHighlight = Literal["none", "karaoke_fill", "active_word"]
+CaptionAnimation = Literal["none", "pop", "fade"]
+OSTAnimation = Literal["none", "pop", "slide_up", "fade"]
 TTSBackendName = Literal["elevenlabs", "google"]
 EffectKind = Literal["none", "freeze_first", "ken_burns_in", "ken_burns_out", "slow_mo"]
 TransitionKind = Literal["cut", "crossfade"]
@@ -126,6 +131,13 @@ class EDLCaptions(BaseModel):
     highlight: CaptionHighlight = "none"
     highlight_color: str = "#FFD600"
     cues: list[EDLCaptionCue] = Field(default_factory=list)
+    animate: CaptionAnimation = "none"          # entrance of each active word/chunk
+    animate_overshoot: float = 0.12             # pop scale peak = 1 + overshoot
+    animate_duration: float = 0.12              # seconds for the pop entrance
+    active_word_bg: str | None = None           # hex; rounded pill behind active word
+    active_word_bg_radius: int = 12
+    active_word_scale: float | None = None      # persistent zoom of the current word
+    fade_ms: int = 0                            # per-chunk in/out fade (0 = off)
 
 
 class EDLOSTCue(BaseModel):
@@ -135,6 +147,9 @@ class EDLOSTCue(BaseModel):
     text: str
     style: OSTStyle = "dark"
     position: OSTPosition = "bottom"
+    animate_in: OSTAnimation = "none"
+    animate_out: OSTAnimation = "none"
+    animate_duration: float = 0.18
 
 
 class EDL(BaseModel):
@@ -223,6 +238,10 @@ def validate_edl(edl: EDL, resolver: ClipResolver | None = None) -> list[Validat
         _check_range(issues, f"audio[{i}]", cue.start, cue.end, out.duration)
     for i, cue in enumerate(edl.ost):
         _check_range(issues, f"ost[{i}]", cue.start, cue.end, out.duration)
+        if not (0.0 <= cue.animate_duration <= 1.0):
+            issues.append(ValidationIssue(
+                "error", f"ost[{i}].animate_duration", "must be in [0.0, 1.0]",
+            ))
 
     sorted_video = sorted(enumerate(edl.video), key=lambda kv: kv[1].start)
     prev_end = 0.0
@@ -360,6 +379,32 @@ def validate_edl(edl: EDL, resolver: ClipResolver | None = None) -> list[Validat
             issues.append(ValidationIssue(
                 "error", "captions.highlight_color",
                 f"must be a hex color like '#FFD600'; got {edl.captions.highlight_color!r}",
+            ))
+        if edl.captions.animate_overshoot < 0:
+            issues.append(ValidationIssue(
+                "error", "captions.animate_overshoot", "must be >= 0",
+            ))
+        if not (0.0 <= edl.captions.animate_duration <= 1.0):
+            issues.append(ValidationIssue(
+                "error", "captions.animate_duration", "must be in [0.0, 1.0]",
+            ))
+        if edl.captions.fade_ms < 0:
+            issues.append(ValidationIssue(
+                "error", "captions.fade_ms", "must be >= 0",
+            ))
+        if edl.captions.active_word_bg is not None and not _is_hex_color(edl.captions.active_word_bg):
+            issues.append(ValidationIssue(
+                "error", "captions.active_word_bg",
+                f"must be a hex color like '#FFD600'; got {edl.captions.active_word_bg!r}",
+            ))
+        if edl.captions.active_word_bg_radius < 0:
+            issues.append(ValidationIssue(
+                "error", "captions.active_word_bg_radius", "must be >= 0",
+            ))
+        if edl.captions.active_word_scale is not None and edl.captions.active_word_scale < 1.0:
+            issues.append(ValidationIssue(
+                "error", "captions.active_word_scale",
+                "must be >= 1.0 (the active word scales up, not down)",
             ))
 
     if edl.music is not None and edl.music.duck and edl.voiceover is None:
