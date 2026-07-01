@@ -1,0 +1,2 @@
+recursive-include supaclip/assets *.ttf *.txt
+include LICENSE README.md

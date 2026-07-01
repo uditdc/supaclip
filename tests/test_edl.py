@@ -272,6 +272,89 @@ def test_validate_music_duck_without_voiceover_warns():
     assert any(i.severity == "warning" and "music.duck" in i.path for i in issues)
 
 
+def test_caption_animation_fields_default_off():
+    cap = EDLCaptions()
+    assert cap.animate == "none"
+    assert cap.fade_ms == 0
+    assert cap.active_word_bg is None
+
+
+def test_ost_animation_fields_default_off():
+    cue = EDLOSTCue(start=0, end=1, text="x")
+    assert cue.animate_in == "none" and cue.animate_out == "none"
+
+
+def test_validate_rejects_bad_active_word_bg():
+    vo = EDLVoiceover(voice_id="v", script="hi")
+    edl = _basic_edl()
+    edl.captions = EDLCaptions(highlight="karaoke_fill", active_word_bg="blue")
+    edl.voiceover = vo
+    issues = validate_edl(edl)
+    assert any(i.path == "captions.active_word_bg" and i.severity == "error"
+               for i in issues)
+
+
+def test_validate_rejects_out_of_range_animate_duration():
+    edl = _basic_edl()
+    edl.captions = EDLCaptions(animate="pop", animate_duration=2.0)
+    issues = validate_edl(edl)
+    assert any(i.path == "captions.animate_duration" and i.severity == "error"
+               for i in issues)
+
+
+def test_validate_rejects_active_word_scale_below_one():
+    edl = _basic_edl()
+    edl.captions = EDLCaptions(highlight="active_word", active_word_scale=0.8)
+    issues = validate_edl(edl)
+    assert any(i.path == "captions.active_word_scale" and i.severity == "error"
+               for i in issues)
+
+
+def test_validate_accepts_active_word_highlight():
+    edl = _basic_edl()
+    edl.captions = EDLCaptions(style="clean_white", highlight="active_word",
+                               highlight_color="#39FF14", active_word_scale=1.2)
+    issues = validate_edl(edl)
+    assert [i for i in issues if i.severity == "error"] == []
+
+
+def test_validate_rejects_negative_fade_ms():
+    edl = _basic_edl()
+    edl.captions = EDLCaptions(fade_ms=-10)
+    issues = validate_edl(edl)
+    assert any(i.path == "captions.fade_ms" and i.severity == "error" for i in issues)
+
+
+def test_validate_rejects_bad_ost_animate_duration():
+    edl = _basic_edl()
+    edl.ost = [EDLOSTCue(start=0, end=2, text="x", animate_in="pop", animate_duration=3.0)]
+    issues = validate_edl(edl)
+    assert any(i.path == "ost[0].animate_duration" and i.severity == "error"
+               for i in issues)
+
+
+def test_validate_accepts_new_animation_defaults():
+    edl = _basic_edl()
+    edl.captions = EDLCaptions(animate="pop", active_word_bg="#1E90FF", fade_ms=120)
+    edl.ost = [EDLOSTCue(start=0, end=2, text="x", style="yellow_punch_shadow",
+                         animate_in="pop", animate_out="fade")]
+    issues = validate_edl(edl)
+    assert [i for i in issues if i.severity == "error"] == []
+
+
+def test_roundtrip_with_animation_fields(tmp_path):
+    edl = _basic_edl()
+    edl.captions = EDLCaptions(style="karaoke_yellow", highlight="karaoke_fill",
+                               animate="pop", animate_overshoot=0.15,
+                               active_word_bg="#1E90FF", active_word_bg_radius=16,
+                               fade_ms=120)
+    edl.ost = [EDLOSTCue(start=0.0, end=2.0, text="HOOK", style="yellow_punch_shadow",
+                         animate_in="pop", animate_out="slide_up", animate_duration=0.2)]
+    p = tmp_path / "edl.json"
+    save_edl(edl, p)
+    assert load_edl(p) == edl
+
+
 def test_v11_roundtrip_with_all_new_fields(tmp_path):
     edl = _basic_edl()
     edl.video[0] = EDLVideoCue(start=0.0, end=5.0, clip_id=1,

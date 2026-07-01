@@ -54,6 +54,9 @@ supaclip-mcp = "supaclip.catalog.mcp:main"
 include = ["supaclip*"]
 exclude = ["tests*"]
 
+[tool.setuptools.package-data]
+supaclip = ["assets/fonts/*.ttf", "assets/fonts/*.txt"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
